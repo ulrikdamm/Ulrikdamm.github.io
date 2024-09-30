@@ -1,6 +1,8 @@
+---
 layout: page
 title: "The Unity Entities ECS Guide"
 permalink: /unity-entities-guide
+---
 
 # The Unity Entities ECS Guide
 
