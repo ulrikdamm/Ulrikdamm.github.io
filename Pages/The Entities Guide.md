@@ -1,4 +1,8 @@
-# The Entities Guide
+layout: page
+title: "The Unity Entities ECS Guide"
+permalink: /unity-entities-guide
+
+# The Unity Entities ECS Guide
 
 This is going to be a guide on using Unity’s new ECS system. A lot of information online talks about outdated versions of the system, and many guides assume a pure-ECS environment, so this is going to be a quick guide on using ECS to speed up and simplify things in an existing gameobject-based project.
 
