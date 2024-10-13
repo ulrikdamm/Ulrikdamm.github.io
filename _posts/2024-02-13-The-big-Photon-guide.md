@@ -4,22 +4,22 @@ title: "The Big Photon Fusion Guide"
 permalink: /photon-fusion-guide
 ---
 
-Alright, this is going to be kind of a primer on the principles on the model of networking we’re using in our game. The reason it’s getting documented here is that it’s a kind of complicated setup, and small mistakes can be difficult to debug, so care must be taken in implementing everything correctly. Also, Photon’s own documentation is worthless.
+This is going to be kind of a primer on using Photon Fusion to get your Unity game networked. The reason it’s getting documented here is that it’s a kind of complicated setup, and small mistakes can be difficult to debug, so care must be taken in implementing everything correctly. This guide is focused on a host-authoritative setup, meaning that it'll work for one-client-as-host or dedicated server setups, but many of the principles can be applied to shared-authority setups as well.
 
 ## Overview and definitions
 
-The idea behind host-authoritative networking is that only one client (or a dedicated host server) can modify the shared state of the game. Want to move an object, and have it move for every player? Only the host can do that. If you’re a client, you have to tell the host to move it for you. There are two different ways of telling things to the host (Remote Procedure Calls and networked input).
+The idea behind host-authoritative networking is that only one client (or a dedicated host server) can modify the shared state of the game. Want to move an object, and have it move for every player? Only the host can do that. If you’re a client, you have to tell the host to move it for you. There are two different ways of telling things to the host: Remote Procedure Calls and networked input.
 
-* Remote Procedure Calls is the easy option, it’s just sending a message to the host, as if it was an HTTP request. The message can be configured to just executing as soon as possible, or to wait to run on the same simulation tick as the client is currently in. You can also attach parameters, such as a target position for an ability, or even reference other networked objects, by just passing in a NetworkObject reference. TODO downsides of RPC.
-* If you want it to move immediately on the client, you can choose to simulate it’s position, while waiting for the host. The host will then need to apply the change retroactively, so that it has started on the same tick as on the client tick. The way this is done is with networked input. Photon will be polling the client with Input Authority over an object for input, and this input will be applied on the host as well.
-    * In a simple game, an input would be directly tied to mouse/keyboard input, so that Input.GetKey would be passed into an input struct, which will be picked up by Photon, an replicated on the host. Since this is not a simple game, and input is not simple, out input won’t be tied directly to a button, but instead to something like “used the lord action tied to the left mouse button” or “consumed a health potion”.
+* Remote Procedure Calls is the easy option, it’s just sending a message to the host, as if it was an HTTP request. The message can be configured to just executing as soon as possible, or to wait to run on the same simulation tick as the client is currently in. You can also attach parameters, such as a target position for an ability, or even reference other networked objects, by just passing in a NetworkObject reference.
+* If you want it to move immediately on the client, you can choose to simulate its position, while waiting for the host. The host will then need to apply the change retroactively, so that it has started on the same tick as on the client tick. The way this is done is with networked input. Photon will be polling the client with Input Authority over an object for input, and this input will be applied on the host as well.
+    * In a simple game, an input would be directly tied to mouse/keyboard input, so that Input.GetKey would be passed into an input struct, which will be picked up by Photon, and replicated on the host. In a more complex game, input is not simple and won’t be tied directly to a button, but instead to something like “used the action tied to the left mouse button” or “started charging ability x”.
     * This also means that the game can’t do simulation based directly on input, it has go to through the Photon input. This means that you can’t just use Input.GetKey inside the simulation, because the simulation can be rolled back and re-simulated, and it will need to be able to re-poll old input.
 
 Each object in the world have one of three client-local states:
 
 * Input authoritative means that the client controls input for that.
 * State authoritative means that the client controls the shared networked state of an object. For the host-authoritative setup, the host has state authority over all objects. In a setup with shared authority, state authority can be passed to clients, but we’re not using that.
-* If an object is neither input or state authoritative, it’s a proxy. Proxies are empty shells of objects, that don’t do any simulation or rewind, but only receives their networked state, and applies that state visually. This is for example another player lord, when you’re not the host.
+* If an object is neither input or state authoritative, it’s a proxy. Proxies are empty shells of objects, that don’t do any simulation or rewinding, but only receives their networked state, and applies that state visually. This is for example another player lord, when you’re not the host.
 
 ## Photon Components
 
@@ -36,6 +36,7 @@ The main object responsible for running the networking simulation. Everything ne
 ### NetworkObject
 
 This is a component you attach to a game object to make it networked. Needs to be in the root of the object, and will apply to all child objects also. This contains things like the owner of the object, and wether the local client has state/input authority.
+NetworkObjects have to be baked before they can be used, since its list of networked behaviours tied to the object is static, meaning networked behaviours can't be added at runtime. For networked objects in scenes and prefabs, Fusion will automatically bake them on save, but if you want to create a networked object from scratch at runtime, you'll have to go through a baking step (not documented here).
 
 ### NetworkTransform
 
@@ -45,32 +46,33 @@ Put on an object to sync its transform (position/rotation/scale/parent). All the
 
 This is a base class you’ll need to subclass for a class to interact with the simulation. It’ll have the following overridable methods:
 
-* Spawned is called when the object appears in the simulation
-* FixedUpdateNetwork is where a simulation tick happens. This is only called for objects with state and/or input authority. Called on a regular interval, equivalent to FixedUpdate() for physics. In this method, you can’t use Time.deltaTime, you need to use Runner.deltaTime.
-* Render is called each screen-frame, like Update, and contains an interpolated version of the networked state. All visuals responding to networked state should happen here, like animator properties and particle system activations.
+* `Spawned` is called when the object appears in the simulation
+* `FixedUpdateNetwork` is where a simulation tick happens. This is only called for objects with state and/or input authority. Called on a regular interval, equivalent to `FixedUpdate()` for physics. In this method, you can’t use `Time.deltaTime`, you need to use `Runner.deltaTime`.
+* `Render` is called each screen-frame, like Update, and contains an interpolated version of the networked state. All visuals responding to networked state should happen here, like animator properties and particle system activations.
 
 Other than that, you get access to some useful methods and properties:
 
-* Runner accesses the NetworkRunner.
-* GetInput<> accesses the input struct for the current tick, if available.
-* GetChangeDetector returns a change detector, that can be used to track changes in networked state, especially useful for proxies.
+* `Runner` accesses the NetworkRunner.
+* `GetInput<>` accesses the input struct for the current tick, if available.
+* `GetChangeDetector` returns a change detector, that can be used to track changes in networked state, especially useful for proxies.
 
 And you’re able to use these attributes:
 
-* [Networked] attribute on a property makes that property part of the networked simulation, and automatically updates it based on the current tick. Only the state authority can change these, if a client changes them, that’ll be seen as a prediction, and will be overridden at some point with the real value. Networked properties must have a getter and setter, and these will have their implementation spliced in at compiletime by Photon using IL weaving.
-* [Rpc] attribute on a method makes it into a Remote Procedure Call. The name must also be prefixed or suffixed with “rpc”.
+* `[Networked]` attribute on a property makes that property part of the networked simulation, and automatically updates it based on the current tick. Only the state authority can change these, if a client changes them, that’ll be seen as a prediction, and will be overridden at some point with the real value. Networked properties must have a getter and setter, and these will have their implementation spliced in at compiletime by Photon using IL weaving.
+* `[Rpc]` attribute on a method makes it into a Remote Procedure Call. The name must also be prefixed or suffixed with `rpc`.
+* `[OnChangeRender()]` can be added to a `[Networked]` property to have a method invoked whenever the value changes, like a shorthand syntax for change detectors.
 
 ### INetworkRunnerCallbacks
 
-TODO
+*TODO*
 
 ### INetworkInput
 
-TODO
+*TODO*
 
 ## Simulation principles
 
-All networked state can be seen as a deterministic simulation, being executed potentially in parallel on multiple clients. This simulation has [Networked] properties as its state. Communication into and out of the simulation must happen at certain points, and all methods called from within the simulation must also follow the same rules.
+All networked state can be seen as a deterministic simulation, being executed potentially in parallel on multiple clients. This simulation has `[Networked]` properties as its state. Communication into and out of the simulation must happen at certain points, and all methods called from within the simulation must also follow the same rules.
 A simple example of just an object moving at a constant velocity:
 
 ```c#
@@ -83,9 +85,12 @@ class ExampleSimulation : NetworkBehaviour {
 }
 ```
 
-This simulation could run on different machines, and is sufficiently deterministic. Note that this wouldn’t work for a lockstep implementation, since float imprecision could cause the exact value to drift differently over time on different machines, leading to the simulation diverging. We don’t have this problem, because we have a host as the final arbiter. The network will be synced regularly, and the host will apply its value of position to a client simulation, if they become out of sync, and re-simulate the ticks since the desync.
-Let’s say, for arguments sake, that Vector3.left had been overridden to have a length of 2 on the client. What would happen to the simulation? For the first few ticks, the position would increase at double the velocity. Starting at tick 0 with an X value of 0, for each tick the value would go 2, 4, 6, etc.
-At tick 3, with a value of 6, it might get a sync back from the server, and it’ll perform a rollback of the client prediction, insert the server value of position, and then re-run the simulation. So at tick 1, the server would overwrite the 2 it had on the client to a 1, and then re-run the next simulation ticks. Since the local Vector3.left still is at odds with the server value, the local simulation would keep diverging in the prediction, but now at least at tick 1, it would have the correct value, and it would simulate 3, 5, 7, etc. as the next values. The next server sync might apply the value of 4 to tick 4, that used to have the value of 7, and then re-run the simulation up to the current tick. There will always be a tick where all the values match the server values, but all ticks after that are client predicted, and will eventually be re-simulated. This means that if you put a Debug.Log into FixedUpdateNetwork, printing the current Runner.Tick, you will see it print the same tick value multiple times on the client.
+This simulation could run on different machines, and is sufficiently deterministic. Note that this wouldn’t work for a lockstep implementation, since float imprecision might cause the exact value to drift differently over time on different machines, leading to the simulation diverging. We don’t have this problem, because we have a host as the final arbiter. The network will be synced regularly, and the host will apply its value of position to a client simulation, if they become out of sync, and re-simulate the ticks since the desync.
+
+Let’s say, for arguments sake, that `Vector3.left` had been overridden to have a length of 2 on the client. What would happen to the simulation? For the first few ticks, the position would increase at double the velocity. Starting at tick 0 with an X value of 0, for each tick the value would go 2, 4, 6, etc.
+
+At tick 3, with a value of 6, it might get a sync back from the server, and it’ll perform a rollback of the client prediction, insert the server value of position, and then re-run the simulation. So at tick 1, the server would overwrite the 2 it had on the client to a 1, and then re-run the next simulation ticks. Since the local Vector3.left still is at odds with the server value, the local simulation would keep diverging in the prediction, but now at least at tick 1, it would have the correct value, and it would simulate 3, 5, 7, etc. as the next values. The next server sync might apply the value of 4 to tick 4, that used to have the value of 7, and then re-run the simulation up to the current tick. There will always be a tick where all the values match the server values, but all ticks after that are client predicted, and will eventually be re-simulated. This means that if you put a `Debug.Log` into `FixedUpdateNetwork`, printing the current Runner.Tick, you will see it print the same tick value multiple times on the client.
+
 A client mis-prediction is no big deal, since a prediction is going to be wrong at some point no matter what, so the system is made to handle them. What is more of a problem is a non-deterministic simulation. This could be relying on non-simulation state. Take this example:
 
 ```c#
@@ -101,12 +106,13 @@ class ExampleSimulation : NetworkBehaviour {
 }
 ```
 
-The velocity field is state that is not part of the simulation, since it’s not marked with [Networked]. This means that, while it’ll exist on both the host and the client, and be increased similarly, it won’t get host changes applied, and it won’t be rolled back when re-simulating. So when the client receives values from the host, and performs a rollback, the value of velocity will not only stay the same, it will have the += Runner.deltaTime re-applied, since those ticks are evaluated multiple times, and the result will be a velocity value of out sync between the host and the client.
-Accessing non-mutable values, like Vector3.left or ScriptableObject properties, is no problem, since these will be the same on the host and client, but all mutable state must be done through networked properties.
+The velocity field is state that is not part of the simulation, since it’s not marked with `[Networked]`. This means that, while it’ll exist on both the host and the client, and be increased similarly, it won’t get host changes applied, and it won’t be rolled back when re-simulating. So when the client receives values from the host, and performs a rollback, the value of velocity will not only stay the same, it will have the += Runner.deltaTime re-applied, since those ticks are evaluated multiple times, and the result will be a velocity value of out sync between the host and the client.
+
+Accessing non-mutable values, like `Vector3.left` or `ScriptableObject` properties, is no problem, since these will be the same on the host and client, but all mutable state must be done through networked properties.
 
 ## Timers
 
-For timers specifically, Photon has a built-in networked TickTimer. For networked state, this should be used instead of a float counting down:
+For timers specifically, Photon has a built-in networked `TickTimer`. For networked state, this should be used instead of a float counting down:
 
 ```c#
 class ExampleSimulation : NetworkBehaviour {
@@ -130,13 +136,15 @@ class ExampleSimulation : NetworkBehaviour {
 
 Under the hood, the TickTimer is just a target tick, and the methods you call will compare the target tick to the current tick.
 
+The reason you don't want to use a counting float, that you subtract the delta time from each frame, is that that's going to create a lot of network traffic. The updated countdown value will have to be sent to each client *each tick*. Using a `TickTimer`, the only value sent over the network is the end-tick, and each tick, you'll just compare that to the current tick, no network traffic needed. One float per tick might not sound like a lot, but if you have a few of these for every unit in the game, that quickly adds up.
+
 ## Simulation Input
 
 As mentioned in the overview, input into the simulation can be done with either Remote Procedure Calls or networked input.
 
 ### Remote Procedure Calls
 
-The remote procedure call will call directly into the host to change values. This could be a player performing an emote, that we want replicated on all clients, and it not time critical, so won’t be needing client-side prediction. We define a Remote Procedure Call by giving it the [Rpc] attribute
+The remote procedure call will call directly into the host to change values. This could be a player performing an emote, that we want replicated on all clients, and it not time critical, so won’t be needing client-side prediction. We define a Remote Procedure Call by giving it the `[Rpc]` attribute
 
 ```c#
 [Networked] public int lastEmotePerformed { get; set; }
@@ -151,7 +159,7 @@ void rpcPerformEmote(int emoteType) {
 }
 ```
 
-Photon will re-write the code at compile time, so that the rpcPerformEmote will be transformed into an RPC call on the client, that will invoke the method on the host. The clients can then set up a change detector on the lastEmotePerformed property, and display the emote on value change (more on that later).
+Photon will re-write the code at compile time, so that the `rpcPerformEmote` will be transformed into an RPC call on the client, that will invoke the method on the host. The clients can then set up a change detector on the `lastEmotePerformed` property, and display the emote on value change (more on that later). RPCs can also go both ways: the client can send messages to the host, and the host can send messages to one or more clients.
 
 ### Networked input
 
@@ -179,7 +187,7 @@ public void onAbilitySelected(int id) {
 }
 ```
 
-The input is then passed on to Photon in the OnInput method from the INetworkRunnerCallbacks interface, that is implemented on a component, sitting on the same game object as the NetworkRunner:
+The input is then passed on to Fusion in the OnInput method from the `INetworkRunnerCallbacks` interface, that is implemented on a component, sitting on the same game object as the `NetworkRunner`:
 
 ```c#
 void OnInput(NetworkRunner runner, NetworkInput input) {
@@ -190,6 +198,7 @@ void OnInput(NetworkRunner runner, NetworkInput input) {
 ```
 
 Notice that the abilityActivated value only should be set for a single tick, the tick in which the ability is performed, so it’s reset once the input has been sent.
+
 The input values are now registered in the simulation, and can be retrieved in a FixedUpdateNetwork via the GetInput method:
 
 ```c#
@@ -208,8 +217,9 @@ Notice that the input might not be available. This might be that you don’t hav
 
 ## Simulation Output
 
-Outputting results of the simulation seems like a straightforward thing to do. For outputting positions, you just change transform.position. Change to a walk animation when moving by checking the change in position, and apply it to the animator. And some of this is simple enough. However, even in this, there are caveats. Say, if you get input that an ability has been pressed, and you want to perform an animation. If you just use SetTrigger in FixedUpdateNetwork, this is going to lead to problems, since the trigger will end up being set multiple times, for each time that tick is re-simulated. Also, FixedUpdateNetwork doesn’t get executed on proxy objects (objects where the game is neither state nor input authority), so neither the walk nor ability animations will get triggered.
-Instead, output of the simulation should happen in the Render method. This method is called more like the Unity Update message, in between ticks, to match the framerate of the game. This will also prevent stutter, since applying values in FixedUpdateNetwork will only happen at the specified tick interval, no matter the refresh rate of the screen.
+Outputting results of the simulation seems like a straightforward thing to do. For outputting positions, you just change transform.position. Change to a walk animation when moving by checking the change in position, and apply it to the animator. And some of this is simple enough. However, even in this, there are caveats. Say, if you get input that an ability has been pressed, and you want to perform an animation. If you just use `SetTrigger` in `FixedUpdateNetwork`, this is going to lead to problems, since the trigger will end up being set multiple times, for each time that tick is re-simulated. Also, `FixedUpdateNetwork` doesn’t get executed on proxy objects (objects where the game is neither state nor input authority), so neither the walk nor ability animations will get triggered.
+
+Instead, output of the simulation should happen in the `Render` method. This method is called more like the Unity `Update` message, in between ticks, to match the framerate of the game. This will also prevent stutter, since applying values in `FixedUpdateNetwork` will only happen at the specified tick interval, no matter the refresh rate of the screen.
 
 ### The Render method
 
@@ -231,8 +241,10 @@ class PlayerMovement : NetworkBehaviour {
 }
 ```
 
-Note that you would properly just move an object using the NetworkTransform component, but for demonstrations sake, this object doesn’t have one, and we change transform.position manually instead.
-In this case, if we had just applied input.playerMovement directly to transform.position in FixedUpdateNetwork, the movement would end up jittery, since the position wouldn’t be smoothly interpolated, and also proxy objects wouldn’t move at all. The input authority object would also have its transform.position changed back and forth during re-simulation, which is not ideal.
+Note that you would properly just move an object using the `NetworkTransform` component, but for demonstrations sake, this object doesn’t have one, and we change `transform.position` manually instead.
+
+In this case, if we had just applied `input.playerMovement` directly to `transform.position` in `FixedUpdateNetwork`, the movement would end up jittery, since the position wouldn’t be smoothly interpolated, and also proxy objects wouldn’t move at all. The input authority object would also have its `transform.position` changed back and forth during re-simulation, which is not ideal.
+
 There’s a lot of different techniques you can use in the Render method, so they’ll be covered in its own section later.
 
 ### Animator parameters
@@ -269,8 +281,10 @@ Here we save the old position in a field, and use that to figure out, how far th
 ### Animation triggers and Change Detectors
 
 Our next task is slightly more involved, which is to set an animation trigger. This has to be done only once, and it has to be done in the Render method.
+
 The obvious way to do it would be to have a boolean field, that get’s set by the simulation step, and the next Render call will then trigger the animation, and reset the field. However this won’t work correctly, since the same simulation step might get calculated multiple times, and might then trigger the animation on multiple different frames. Also, it will never trigger on proxies.
-Instead, to observe values in the simulation from the outside, a Change Detector can be used instead. This will keep track of networked state, and you can poll it for changes in the Render method. Here’s an example, omitting the FixedUpdateNetwork, as it will be from the point of view of a proxy:
+
+Instead, to observe values in the simulation from the outside, a Change Detector can be used instead. This will keep track of networked state, and you can poll it for changes in the Render method. Here’s an example, omitting the `FixedUpdateNetwork`, as it will be from the point of view of a proxy:
 
 ```c#
 class PlayerAnimation : NetworkBehaviour {
@@ -286,21 +300,24 @@ class PlayerAnimation : NetworkBehaviour {
     
     public override void Render() {
         var changes = changeDetector.DetectChanges(this, out var oldValues, out var newValues);
-            foreach (var change in changes) {
+        
+        foreach (var change in changes) {
             case nameof(actionCount):
                 var propertyReader = GetPropertyReader<int>(change);
                 var (oldValue, newValue) = propertyReader.Read(oldValues, newValues);
+                
                 if (newValue > oldValue) {
                     animator.SetTrigger("Attack");
                 }
-                break;
+            break;
         }
     }
 }
 ```
 
-You might be wondering why an actionCount as an integer is used instead of just a bool actionPerformed. The reason for that is that even if the bool was only active for one tick, multiple Renders might get run in between a single tick. The Render method also has no way of resetting the value after the animation has been played, since the value is part of the simulation.
-Another option, instead of using a Change Detector, is to keep a non-simulation field in the class, keeping track of the amount of displayed actions, and in the Render method check if actionCount is bigger than displayedActionCount, and update the local value accordingly.
+You might be wondering why an `actionCount` as an integer is used instead of just a `bool actionPerformed`. The reason for that is that even if the bool was only active for one tick, multiple Renders might get run in between a single tick. The Render method also has no way of resetting the value after the animation has been played, since the value is part of the simulation.
+
+Another option, instead of using a Change Detector, is to keep a non-simulation field in the class, keeping track of the amount of displayed actions, and in the Render method check if `actionCount` is bigger than `displayedActionCount`, and update the local value accordingly.
 
 ```c#
 class PlayerAnimation : NetworkBehaviour {
@@ -321,7 +338,7 @@ class PlayerAnimation : NetworkBehaviour {
 
 ### Non-networked simulation output
 
-If you need some output from the simulation, that is only visible to the local player (this could be a green UI flash when using a health potion), there is an easier way, that doesn’t require the Render method. This can be done from within the simulation tick, by checking if we’re currently simulating the local player, and only if the simulation is going forward (meaning it’s not a re-simulation). We need to check for forward, since the tick is going to be re-simulated on the client when the next host data arrives, and we don’t want the effect playing twice.
+If you need some output from the simulation, that is only visible to the local player (this could be a green UI flash when using a health potion), there is an easier way, that doesn’t require the `Render` method. This can be done from within the simulation tick, by checking if we’re currently simulating the local player, and only if the simulation is going forward (meaning it’s not a re-simulation). We need to check for forward, since the tick is going to be re-simulated on the client when the next host data arrives, and we don’t want the effect playing twice.
 
 ```c#
 class PlayerHealth : NetworkBehaviour {
@@ -375,7 +392,7 @@ class PlayerAttack : NetworkBehaviour {
 
 ### More Render method techniques
 
-The Render method has to observe the [Networked] state of an object, and apply that state to the visual display of it. This sounds simple enough, but you’ll quickly run into a lot of tricky cases. Let’s go through a few of these.
+The Render method has to observe the `[Networked]` state of an object, and apply that state to the visual display of it. This sounds simple enough, but you’ll quickly run into a lot of tricky cases. Let’s go through a few of these.
 
 #### Observing timers
 
@@ -438,7 +455,7 @@ class ShowEffectOnEnd : NetworkBehaviour {
 
 #### Local-player-only effects
 
-If you need an effect to show up only for the local player, like a stamina meter displayed on screen, you just use HasInputAuthority as a check
+If you need an effect to show up only for the local player, like a stamina meter displayed on screen, you just use `HasInputAuthority` as a check
 
 ```c#
 class StaminaHandler : NetworkBehaviour {
@@ -458,10 +475,9 @@ class StaminaHandler : NetworkBehaviour {
 
 ### Spawned callback
 
-Spawned is called when a NetworkBehaviour has been instantiated and registered into the Fusion simulation. Before Spawned is called, accessing (even just reading) Networked properties will result in an error.
-When registering multiple objects at the same time, like when loading a scene, all the objects are registered before the first Spawned is called, which means that you can access networked properties on other objects before their Spawned callback, as long as they’re valid (IsValid is true).
-TODO
-NetworkObject.IsValid to check if the object has been spawned?
+`Spawned` is called when a `NetworkBehaviour` has been instantiated and registered into the Fusion simulation. Before `Spawned` is called, accessing (even just reading) networked properties will result in an error.
+
+When registering multiple objects at the same time, like when loading a scene, all the objects are registered before the first `Spawned` is called, which means that you can access networked properties on other objects before their `Spawned` callback, as long as they’re valid (`IsValid` is true).
 
 ### Common patterns
 
@@ -525,19 +541,19 @@ void rpcPurchaseItemError([RpcTarget] PlayerRef player, ItemPurchaseError error)
 
 A few things to note here:
 
-* canPurchaseItem is run both on the client and the server.
+* `canPurchaseItem` is run both on the client and the server.
 * Even though the item would probably not be visible in the ui, or be disabled, if it’s unavailable, a check is still made to see if it is, since a modded client might enable the button, or send RPC to try to buy any item.
-* The client to server RPC has an RpcInfo parameter, this is how you get which client sent the request (.Source).
-* The server to client RPC has an [RpcTarget] parameter, this is how to target an RPC to go to one specific player (you only want the error to show up for the player that tried to perform the purchase, not all players).
-* Fusion is limited in what types can be sent as parameters to an RPC: plain enums are fine (they’re just ints), ScriptableObjects are not (you’ll have to serialize/deserialize them, for example to an int identifier).
+* The client to server RPC has an `RpcInfo` parameter, this is how you get which client sent the request (`.Source`).
+* The server to client RPC has an `[RpcTarget]` parameter, this is how to target an RPC to go to one specific player (you only want the error to show up for the player that tried to perform the purchase, not all players).
+* Fusion is limited in what types can be sent as parameters to an RPC: plain enums are fine (they’re just ints), `ScriptableObject`s are not (you’ll have to serialize/deserialize them, for example to an int identifier).
 * The error enum has an “unknown” case, used for when something unexpected goes wrong (like the item deserialization failing). There’s not really any good error to show for this case, but just choosing a random one or using “none” is problematic.
 
 One final detail is that here the error is just a plain enum, which simplifies the example, but that’s missing to things that might be critical:
 
 * No way to attach parameters to each case. If you want an error like “requires character level 10”, you need to attach the level value to the case somehow.
-* No way to do custom error messages. You can of course create a itemPurchaseErrorToString method, but it would be nice if this could be in the error type itself.
+* No way to do custom error messages. You can of course create a `itemPurchaseErrorToString` method, but it would be nice if this could be in the error type itself.
 
-We can solve that by creating an error struct instead. Structs can be sent as RPC parameters, as long as they implement the INetworkStruct interface, and only contains RPC-compatible types.
+We can solve that by creating an error struct instead. Structs can be sent as RPC parameters, as long as they implement the `INetworkStruct` interface, and only contains RPC-compatible types.
 
 ```c#
 struct ItemPurchaseError : INetworkStruct {
@@ -565,8 +581,9 @@ struct ItemPurchaseError : INetworkStruct {
 }
 ```
 
-The static fields are for convenience to make it easier to create error than new ItemPurchaseError { type = ... }, but they also exist for correctness purposes, since you can’t forget to pass in the level for the minLevelRequired case. However, if you find them annoying to create, and care less about potentially missing parameters, you can omit these.
-This is quite a lot of code, but it gets worse. What if you want a ScriptableObject as an error case parameter? Like if you want to buy an item that is an upgrade of another item, and in the case you don’t have the item to upgrade, the error should say “Requires name-of-item”? You can’t have ScriptableObject references in an INetworkStruct. In this case, you’ll have to make a “normal” error, and serialize it into a “network” error, and deserialize it again when receiving it:
+The static fields are for convenience to make it easier to create error than `new ItemPurchaseError { type = ... }`, but they also exist for correctness purposes, since you can’t forget to pass in the level for the `minLevelRequired` case. However, if you find them annoying to create, and care less about potentially missing parameters, you can omit these.
+
+This is quite a lot of code, but it gets worse. What if you want a `ScriptableObject` as an error case parameter? Like if you want to buy an item that is an upgrade of another item, and in the case you don’t have the item to upgrade, the error should say “Requires name-of-item”? You can’t have `ScriptableObject` references in an `INetworkStruct`. In this case, you’ll have to make a “normal” error, and serialize it into a “network” error, and deserialize it again when receiving it:
 
 ```c#
 struct ItemPurchaseError {
@@ -655,7 +672,7 @@ void rpcMoveUnits(Unit[] units, Vector3 target, RpcInfo info = default) {
     hostMoveUnits(units, target, info.Source);
 }
 
-    [Rpc(RpcSources.StateAuthority, RpcTargets.All, InvokeLocal = true)]
+[Rpc(RpcSources.StateAuthority, RpcTargets.All, InvokeLocal = true)]
 void rpcDidMoveUnits([RpcTarget] PlayerRef player, Unit[] units, Vector3 target) {
     foreach (var unit in units) {
         unit.playActionConfirmSound();
@@ -664,7 +681,9 @@ void rpcDidMoveUnits([RpcTarget] PlayerRef player, Unit[] units, Vector3 target)
 ```
 
 `hostMoveUnits` is the method that actually performs the action, moveUnits is the public facing method that will either just call the internal move method directly if possible, otherwise send an RPC that will call the method on the host.
+
 When the action has been performed on the host, it will call an RPC back to the client that initiated the command, to give them a confirmation. That client might be the host itself, that’s why InvokeLocal is set to true.
+
 Remember that this example doesn’t include validation (is that player allowed to move those units?), failure states (those units can’t go there, show an error to the player) or race conditions (the units are already dead). Also you might have to do some type conversion, if the input arguments to moveUnits has types that can’t be sent over the network (non-INetworkStruct structs, interface references, references to non-NetworkObject objects), so in that case you’ll have to do conversions before call into and out of the RPCs (see the Sending commands section above for examples of how to handle that)
 
 ## Debugging
@@ -677,8 +696,8 @@ Error example:
 
 `AssertException: arg0:Not in list arg1:Brute arg2:[Type: NetworkTransform, List: Lord.Man Nav(Clone)]`
 
-This happens when you despawn an already despawned object, like something calling Runner.Despawn from the Despawned callback. Can also happen when despawning objects while Fusion is in shutdown mode, for this either check Runner.IsShutdown or hasState in the Despawned callback.
-There doesn’t seem to be any official way to check if a NetworkObject has been spawned/despawned, but I think you might be able to use .Runner == null.
+This happens when you despawn an already despawned object, like something calling `Runner.Despawn` from the `Despawned` callback. Can also happen when despawning objects while Fusion is in shutdown mode, for this either check `Runner.IsShutdown` or `hasState` in the `Despawned` callback.
+There doesn’t seem to be any official way to check if a NetworkObject has been spawned/despawned, but I think you might be able to use `.Runner == null`.
 
 #### No-context AssertException in NetworkObjectHeaderSnapshotRef
 
@@ -703,7 +722,7 @@ Fusion.NetworkDictionary`2[K,V].Find (K key) (at Fusion/Fusion.Runtime/Misc/Netw
 Fusion.NetworkDictionary`2[K,V].ContainsKey (K key) (at Fusion/Fusion.Runtime/Misc/NetworkDictionary.cs:267)
 ```
 
-This can happen if you have a networked collection field in a class that isn’t a NetworkBehaviour (even if it has a [Networked] attribute, it won’t complain).
+This can happen if you have a networked collection field in a class that isn’t a `NetworkBehaviour` (even if it has a `[Networked]` attribute, it won’t complain).
 
 #### ILWeaverException
 
@@ -715,7 +734,7 @@ error Fusion.CodeGen.ILWeaverException: Failed to weave behaviour SomeClass
 error ---> Fusion.CodeGen.ILWeaverException: System.Void SomeClass::rpcMethod(Fusion.NetworkRunner): Instance RPCs not allowed for this type
 `
 
-This happens after compilation, and is the Fusion IL-weaver that’s trying to generate code for things like networked properties and RPCs. The weaving will fail if you’re doing something unsupported, like using a non-basic type in an RPC/Networked property/INetworkStruct, or, like in the example above, trying to use a non-static RPC in a non-network-instanced class (meaning not a NetworkBehaviour). This print many more, very unreadable lines of errors, the information you need is usually in the third line (the one containing Instance RPCs not allowed for this type in the example), that’ll tell you where the error is and what is wrong.
+This happens after compilation, and is the Fusion IL-weaver that’s trying to generate code for things like networked properties and RPCs. The weaving will fail if you’re doing something unsupported, like using a non-basic type in an RPC/Networked property/`INetworkStruct`, or, like in the example above, trying to use a non-static RPC in a non-network-instanced class (meaning not a `NetworkBehaviour`). This print many more, very unreadable lines of errors, the information you need is usually in the third line (the one containing Instance RPCs not allowed for this type in the example), that’ll tell you where the error is and what is wrong.
 
 #### ContinueWith weirdness
 
@@ -742,14 +761,17 @@ NullReferenceException: Object reference not set to an instance of an object
 Fusion.NetworkRunner.Spawn(Fusion.NetworkObject prefab, System.Nullable1[T] position, System.Nullable1[T] rotation, System.Nullable`1[T]
 ```
 
-This can happen if you try to spawn an object from a runner, but the runner is not running. Were you expecting a nice error message? Well if there was, this document wouldn’t be necessary.
+This can happen if you try to spawn an object from a runner, but the runner is not running.
 
 #### Network object disabled and/or invalid
 
-All NetworkObjects have to be attached to the runner. When this happens on a client, it will try to find the object on the host, and if it doesn’t exist, I’ll be disabled. A NetworkObject is valid when it has been attached and connected to the object on the host. You can check if the NetworkObject is attached and valid by checking the .IsValid property, or the Is Valid checkbox in the inspector.
-If the NetworkObject is not valid, but not disabled, it means that it hasn’t yet been attached. Generally you use the RegisterSceneObjects method on the NetworkRunner to attach all NetworkObjects in a scene. Alternatively you can use the Attach method directly.
-If the NetworkObject is not valid and disabled, it means that an attach has been attempted, but the object wasn’t found on the host. The object is found by its NetworkTypeID, which is a combination of scene number, object index and load index, and is accessible by the .NetworkTypeID property, and also visible in the inspector. One reason that it couldn’t get attached could be that the two clients disagree on which scene it’s in, since the NetworkTypeID won’t match if the scene numbers are different. In that case, check the SceneRef sent to RegisterSceneObjects. It might also be the object index that’s mismatched; in that case, remember to sort the list of NetworkObjects sent to RegisterSceneObjects with the NetworkObjectSortKeyComparer.Instance sorter.
-In general, use the SceneRef.FromPath(scene.path) instead of SceneRef.FromIndex(scene.buildIndex), since buildIndex might vary between editor and builds, or different builds, if different scenes are enabled.
+All `NetworkObject`s have to be attached to the runner. When this happens on a client, it will try to find the object on the host, and if it doesn’t exist, I’ll be disabled. A NetworkObject is valid when it has been attached and connected to the object on the host. You can check if the `NetworkObject` is attached and valid by checking the .IsValid property, or the Is Valid checkbox in the inspector.
+
+If the `NetworkObject` is not valid, but not disabled, it means that it hasn’t yet been attached. Generally you use the `RegisterSceneObjects` method on the `NetworkRunner` to attach all `NetworkObject`s in a scene. Alternatively you can use the `Attach` method directly.
+
+If the `NetworkObject` is not valid and disabled, it means that an attach has been attempted, but the object wasn’t found on the host. The object is found by its `NetworkTypeID`, which is a combination of scene number, object index and load index, and is accessible by the `.NetworkTypeID` property, and also visible in the inspector. One reason that it couldn’t get attached could be that the two clients disagree on which scene it’s in, since the `NetworkTypeID` won’t match if the scene numbers are different. In that case, check the SceneRef sent to RegisterSceneObjects. It might also be the object index that’s mismatched; in that case, remember to sort the list of `NetworkObject`s sent to `RegisterSceneObjects` with the `NetworkObjectSortKeyComparer.Instance` sorter.
+
+In general, use the `SceneRef.FromPath(scene.path)` instead of `SceneRef.FromIndex(scene.buildIndex)`, since buildIndex might vary between editor and builds, or different builds, if different scenes are enabled.
 
 #### Object not set error
 

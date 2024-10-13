@@ -4,6 +4,8 @@ title: "The Unity Entities ECS Guide"
 permalink: /unity-entities-guide
 ---
 
+*Work in progress*
+
 This is going to be a guide on using Unity’s new ECS system. A lot of information online talks about outdated versions of the system, and many guides assume a pure-ECS environment, so this is going to be a quick guide on using ECS to speed up and simplify things in an existing gameobject-based project.
 
 ## What is ECS
@@ -485,3 +487,5 @@ partial class StunnedIconsUpdater : SystemBase {
 ```
 
 Here we just run into one thing that we haven't exposed yet to the Entities system, which is the position of the unit. For this, there is a special way to efficiently access it.
+
+*TODO finish article*
