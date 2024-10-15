@@ -42,6 +42,7 @@ We're currently working on our big action-strategy hybrid [Dinolords](https://di
 - [*Conduct TOGETHER!*](https://conductthis.com/together) (Nintendo Switch)
 - [*Fly THIS!*](https://www.northplay.co/project/fly) (iOS/Android)
 - [*Fly TOGETHER!*](https://www.northplay.co/project/fly) (Nintendo Switch)
+- [*Super Supermarket*](https://apps.apple.com/us/app/super-supermarket/id1435484076) (iOS/Android)
 - [*Super Planet Life*](https://www.northplay.co/project/planet-life) (Steam, Nintendo Switch)
 - [*Headland*](https://www.northplay.co/project/headland) (Steam, Nintendo Switch)
 - [*Ramasjang Ø-spillet*](https://www.dr.dk/ramasjang/oe-spillet) (iOS/Android)
