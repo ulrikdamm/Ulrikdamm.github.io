@@ -531,20 +531,20 @@ And now we can create the System:
 
 ```c#
 partial class SyncGameObjectTransformToEntitySystem : SystemBase {
-	EntityQuery query;
+    EntityQuery query;
     
-	protected override void OnCreate() {
-		query = GetEntityQuery(typeof(LocalToWorld), typeof(SyncGameObjectTransformToEntity));
-	}
-	
-	protected override void OnUpdate() {
-		var localToWorlds = new NativeArray<LocalToWorld>(length: query.CalculateEntityCount(), Allocator.TempJob);
-		
-		new ApplyTransform { localToWorlds = localToWorlds }.Schedule(query.GetTransformAccessArray()).Complete();
-		
-		query.CopyFromComponentDataArray(localToWorlds);
-		localToWorlds.Dispose();
-	}
+    protected override void OnCreate() {
+        query = GetEntityQuery(typeof(LocalToWorld), typeof(SyncGameObjectTransformToEntity));
+    }
+    
+    protected override void OnUpdate() {
+        var localToWorlds = new NativeArray<LocalToWorld>(length: query.CalculateEntityCount(), Allocator.TempJob);
+        
+        new ApplyTransform { localToWorlds = localToWorlds }.Schedule(query.GetTransformAccessArray()).Complete();
+        
+        query.CopyFromComponentDataArray(localToWorlds);
+        localToWorlds.Dispose();
+    }
 }
 ```
 
