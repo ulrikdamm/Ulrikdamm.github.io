@@ -488,4 +488,84 @@ partial class StunnedIconsUpdater : SystemBase {
 
 Here we just run into one thing that we haven't exposed yet to the Entities system, which is the position of the unit. For this, there is a special way to efficiently access it.
 
-*TODO finish article*
+### Attaching UnityEngine Components to Entities
+
+In general, the components you add to an entity should be pure-state IComponentData structs, so that they can be easily copied and won't have any pointers to global state. However, there might be times where you want access to non-ECS data from your entities. This can be done, it will just limit the opimization potential of systems that accesses that data, since it'll be main-thread only.
+
+One thing we might want to do is to associate a UnityEngine Transform component with an Entity, so that we can copy its position to the entity's LocalToWorld position. Associating the Transform to an entity is pretty easy:
+
+```c#
+entityManager.AddComponentObject(entity, transform);
+```
+
+That's it, it's now associated, and you can get it back with `entityManager.GetComponentObject(entity)`.
+
+Now, for accessing the Transform values, there's a special way to do that.
+
+### IJobParallelForTransform
+
+The base interface for creating a job in the Unity Job System is IJob, but there are specialized versions of IJob that can extend the functionality of a job, like IJobParallelFor, which can be used to make a job run parallel on multiple threads. The Entities package comes with a further specialized form, which is IJobParallelForTransform, which is like IJobParallelFor, but that allows you to loop over entities that have been associated with a UnityEngine Transform component, giving access to that transform. Normally, you would only be able to access this in a system running only on the main thread, since if you put it on a background thread, other code could change the position/rotation/scale/parent of Transforms that you are trying to access. This job, however, doesn't work on a direct reference to the Transforms, but on a TransformAccessArray. How does this work? I'm not sure, since it's completely undocumented, but it should give access to Transforms in the background.
+
+With this, we can create a job that reads the UnityEngine `Transform`s, creates LocalToWorld components from them, and saves those into an array:
+
+```c#
+struct ApplyTransform : IJobParallelForTransform {
+    [WriteOnly]
+    public NativeArray<LocalToWorld> localToWorlds;
+    
+    public void Execute(int index, TransformAccess transform) {
+        localToWorlds[index] = new LocalToWorld { Value = transform.localToWorldMatrix };
+    }
+}
+```
+
+We can then create a System that loops over all of our entities with a LocalToWorld and with an associated Transform object-component, and applies the Transform to the LocalToWorld. Or rather, we actually want to apply it to _some_ of them. We might want to create entities where the LocalToWorld is applied to the Transform, instead of the other way around.
+
+To differentiate these, we can create a tag component:
+
+```c#
+public struct SyncGameObjectTransformToEntity : IComponentData {}
+```
+
+And now we can create the System:
+
+```c#
+partial class SyncGameObjectTransformToEntitySystem : SystemBase {
+	EntityQuery query;
+    
+	protected override void OnCreate() {
+		query = GetEntityQuery(typeof(LocalToWorld), typeof(SyncGameObjectTransformToEntity));
+	}
+	
+	protected override void OnUpdate() {
+		var localToWorlds = new NativeArray<LocalToWorld>(length: query.CalculateEntityCount(), Allocator.TempJob);
+		
+		new ApplyTransform { localToWorlds = localToWorlds }.Schedule(query.GetTransformAccessArray()).Complete();
+		
+		query.CopyFromComponentDataArray(localToWorlds);
+		localToWorlds.Dispose();
+	}
+}
+```
+
+What this does is that it allocates an array of `LocalToWorld`s, one for each entity in our query, and then runs the `ApplyTransform` job by `Schedule`ing it, and immediately `Complete`ing it. Usually you would create jobs and then schedule them into a system of dependend jobs, but this is already running inside the system job, so it would just complicate things. When we schedule a `IJobParallelForTransform` job, we have to pass it a `TransformAccessArray`, which we can get with a handy method on `EntityQuery`, `GetTransformAccessArray()`, which assumes that all the entities in the query have a Transform object associated via `SetComponentObject`. After the `ApplyTransform` job has finished, we have an array of `LocalToWorld`s that are up to date with the `Transform`s. Now we just need to apply those values to the entities' `LocalToWorld`. `EntityQuery` has another handy method to make this easy, which is `CopyFromComponentDataArray`, which will do exactly that to all the entities in the query.
+
+If we wanted to go the other way around, to move the `LocalToWorld`s and have those values copied to `Transform`s every frame, we would just create a `SyncLocalToWorldToGameObjectTransform` tag, and create a system that did the same, just the other way around. Each can work, it's just up to you to decide where the "truth" in your system lies.
+
+### System groups
+
+One additional thing you want to make sure of, is that this system is run before your other LocalToWorld-dependent systems, otherwise they might be a frame behind. To do this, you can make system that runs in specific groups. One of the groups that exists by default is the `TransformSystemGroup`, which we can make our system update as part of, by specifying this in an attribute:
+
+```c#
+[UpdateInGroup(typeof(TransformSystemGroup))]
+partial class SyncGameObjectTransformToEntitySystem : SystemBase {
+    ...
+```
+
+And if we create a system that uses the `LocalToWorld` of an entity, we can make it always run after all transform-related systems are done:
+
+```c#
+[UpdateAfter(nameof(TransformSystemGroup))]
+partial class SomeSystem : SystemBase {
+    ...
+```
