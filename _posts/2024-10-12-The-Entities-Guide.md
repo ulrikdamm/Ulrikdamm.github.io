@@ -331,7 +331,7 @@ public class HealthBaker : Baker<HealthAuthoring> {
     public override void Bake(HealthAuthoring authoring) {
         var entity = GetEntity(TransformUsageFlags.None);
         
-        entity.AddComponentData(entity, new Health {
+        AddComponent(entity, new Health {
             current = authoring.initial,
             max = authoring.max
         });
