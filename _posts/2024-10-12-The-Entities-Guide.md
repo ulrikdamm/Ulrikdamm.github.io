@@ -52,7 +52,7 @@ Enough of the theory, it's time to show how to actually use this thing.
 
 ### Creaing your first entity
 
-The first thing you need to get the Entities ECS started, other than installing the Entities package, is a World to add your Entities into. You can always just create a new World, but the easiest way is to use the default World, which is accessed statically as `World.DefaultGameObjectInjectionWorld`. From that you can get the EntityManager through the `.entityManager` property. This is what you use to create an Entity:
+The first thing you need to get the Entities ECS started, other than installing the Entities package, is a `World` to add your entities into. You can always just create a new `World`, but the easiest way is to use the default `World`, which is accessed statically as `World.DefaultGameObjectInjectionWorld`. From that you can get the `EntityManager` through the `.EntityManager` property. This is what you use to create an entity:
 
 ```c#
 using Unity.Entities;
@@ -61,13 +61,13 @@ var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
 var entity = entityManager.CreateEntity();
 ```
 
-As simple as that, you now have a new, blank Entity. If you open the Entities Hierarchy window in Unity (Window > Entities > Hierarchy), you will be able to find it in the bottom with a name like `Entity 0:1`. This is how Entities are identified. Entities can be given a name with the SetName method, which is a shorthand for adding a Name Compoent to it. Remember, the Entity itself have no state. It doesn't keep track of its own name or Components. The Entity is just an ID; what Components it has is controlled by the EntityManager. That's why all the methods for querying/modifiying Entities are on the EntityManager, not the Entity itself.
+As simple as that, you now have a new, blank entity. If you open the Entities Hierarchy window in Unity (Window > Entities > Hierarchy), you will be able to find it in the bottom with a name like `Entity 0:1`. This is how entities are identified. Entities can be given a name with the `SetName` method, which is a shorthand for adding a name component to it. Remember, the entity itself has no state. It doesn't keep track of its own name or components. The entity is just an ID; what components it has is controlled by the `EntityManager`. That's why all the methods for querying/modifiying entities are on the `EntityManager`, not the entity itself.
 
 ```c#
 entityManager.SetName(entity, "My First Entity");
 ```
 
-It will now show up in the Entity Hierarchy with that name. If you want to disable it, equvivalent to `gameObject.SetActive(false)`, that's just adding a Disabled component to it:
+It will now show up in the Entity Hierarchy with that name. If you want to disable it, equvivalent to `gameObject.SetActive(false)`, that's just adding a `Disabled` tag-component to it:
 
 ```c#
 entityManager.AddComponent<Disabled>(entity);
@@ -81,7 +81,7 @@ entityManager.RemoveComponent<Disabled>(entity);
 
 ### Creating Entity Components
 
-Creating a component to associate some state with an Entity is just making a struct, that conforms to the IComponentData interface.
+Creating a component to associate some state with an entity is just making a struct, that conforms to the ` IComponentData` interface.
 
 ```c#
 struct Health : IComponentData {
@@ -90,22 +90,22 @@ struct Health : IComponentData {
 }
 ```
 
-And to attach it to your Entity:
+And to attach it to your entity:
 
 ```c#
 entityManager.AddComponentData(entity, new Health { current = 100, max = 100 });
 ```
 
-Notice that if you want to actually provide some starter-data to the component when you add it, you use AddComponentData instead of just AddComponent. The same could be accomplished by:
+Notice that if you want to actually provide some starter-data to the component when you add it, you use `AddComponentData` instead of just `AddComponent`. The same could be accomplished by:
 
 ```c#
 entityManager.AddComponent<Health>(entity);
 entityManager.SetComponentData(entity, new Health { current = 100, max = 100 });
 ```
 
-AddComponentData just checks that a Component doesn't already exist, and SetComponentData checks that it does exist.
+`AddComponentData` just checks that a component doesn't already exist, and `SetComponentData` checks that it does already exist.
 
-To get Component values from an Entity, you use GetComponentData, and you can then change the struct, and apply it via SetComponentData
+To get component values from an entity, you use `GetComponentData`, and you can then change the struct, and apply it via `SetComponentData`.
 
 ```c#
 var health = entityManager.GetComponentData<Health>(entity);
@@ -113,13 +113,13 @@ health.current = 50;
 entityManager.SetComponentData(entity, health);
 ```
 
-And to remove the Health Component from the Entity:
+And to remove the `Health` component from the entity:
 
 ```c#
 entityManager.RemoveComponent<Health>(entity);
 ```
 
-One thing to note with IComponentData structs is that they have to be _blittable_. That means that it has some restrictions on what types you can use, notably no reference-types, meaning no strings, arrays or object references. The alternatives to these are `FixedString#Bytes`, `NativeArray` and `UnityObjectRef`.
+`IComponentData` types doesn’t have to be structs, you can also make class components, and you can keep references to other components or game objects in them. However, as we’ll get to see later, if you want to use them in Burst-optimized, background-scheduled, efficient jobs, then a lot more restrictions will apply, like reference types (classes) being completely banned. 
 
 ### Finding Entity Components
 
