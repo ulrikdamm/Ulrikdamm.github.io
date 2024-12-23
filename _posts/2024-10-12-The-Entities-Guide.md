@@ -1,56 +1,58 @@
 ---
 layout: page
-title: "The Unity Entities ECS Guide"
+title: "The Unity DOTS Guide"
 permalink: /unity-entities-guide
 ---
 
 *Work in progress*
 
-This is going to be a guide on using Unity’s new ECS system. A lot of information online talks about outdated versions of the system, and many guides assume a pure-ECS environment, so this is going to be a quick guide on using ECS to speed up and simplify things in an existing gameobject-based project.
+This is going to be a guide on using Unity’s new DOTS system. A lot of information online talks about outdated versions of the system, and many guides assume a pure Entities environment, so this is going to be a quick guide on using DOTS to speed up and simplify things in an existing GameObject-based project.
 
-## What is ECS
+## What is DOTS
 
-An ECS system is a very typical way to structure code for game development. A game scene will consist of Entities in the world with Components attached to give them functionality, and Systems that run to modify the state of those Components.
+DOTS, or the Data Oriented Tech Stack consists of multiple components, the most prominent being the Job System, the Burst compiler, and the entities ECS system. This guide will focus mostly on the entities part of those, but we’ll touch on all of them. 
+
+An ECS system is a very typical way to structure code for game development. A game scene will consist of entities in the world with components attached to give them functionality, and systems that run to modify the state of those Components.
 
 ### The current state of ECS in Unity
 
-Unity have from the beginning had an ECS system; the GameObject is the Entity, which is a class on which you can add/get/remove Components (`AddComponent`/`GetComponent`/etc), Components usually being `MonoBehaviour`s, which is a subclass of the Component class. The System part is a bit more hidden, but it is for example the Update system, which calls the `Update` method on each Component, which allows themselves to update their state.
+Unity have from the beginning had an ECS system; the GameObject is the entity, which is a class on which you can add/get/remove components (`AddComponent`/`GetComponent`/etc), components usually being `MonoBehaviour`s, which is a subclass of the `Component` class. The System part is a bit more hidden, but it is for example the Update system, which calls the `Update` method on each component, which allows themselves to update their state.
 
 This system works pretty well because it’s simple, and easy to work with for programmers used to object-oriented programming. It is, on the other hand, also broken enough to barely be able to be called an ECS.
 
-First of all, the Entity is usually just an ID, with no other associated state. In Unity’s system, that ID is wrapped in a GameObject class, and your ID is a reference to that class. That class only contains things like the name of the object and whether it’s activated or deactivated. That state should really be in Components, since that’s where the state of the Entity is supposed to be. It’s also impossible to create a GameObject with a Transform Component.
+First of all, the entity is usually just an ID, with no other associated state. In Unity’s system, that ID is wrapped in a `GameObject` class, and your ID is a reference to that class. That class contains things like the name of the object and whether it’s activated or deactivated. That state should really be in components, since that’s where the state of the entity is supposed to be. It’s also impossible to create a GameObject without a Transform component, which is kind of weird. 
 
-Second, Components are supposed to be pure state. It’s just a collection of data about the Entity it’s connected to. But in Unity’s case, the Systems got implemented not as separate objects, but as methods on the Components, which just blurs the line of what is a Component and what is a System.
+Second, components are supposed to be pure state. It’s just a collection of data about the entity it’s connected to. But in Unity’s case, the systems got implemented not as separate objects, but as methods on the components, which just blurs the line of what is a component and what is a system.
 
-Last of all, this way of structuring an ECS is just not performant. Every part of the system is a heap-allocated class, which means that it lives in its own place in memory, and something wants to access another part of the system, it will have to jump to another place in memory, usually jumping through a few places to find it. Instantiating new Entities and adding/removing components is very slow, because it requires allocating and instantiating C# objects. Running the Update System requires going through all the Component objects and calling a method by name. And of course, since all Systems have global access to every GameObject and Component currently instantiated (through `Transform.Find`, `FindObjectByType`, singletons, etc), there’s no way this could run on a background thread, meaning everything will have to run sequentially on the main thread.
+Last of all, this way of structuring an ECS is just not performant. Every part of the system is a heap-allocated class, which means that it lives in its own place in memory, and if something wants to access another part of the system, it will have to jump to another place in memory, usually jumping through a few places to find it. Instantiating new entities and adding/removing components is very slow, because it requires allocating and instantiating C# objects. Running the Update System requires going through all the component objects and calling a method by name. And of course, since all systems have global access to every GameObject and component currently instantiated (through `Transform.Find`, `FindObjectByType`, singletons, etc) and can access global state via `static`s, there’s no way this could run on a background thread, meaning everything will have to run sequentially on the main thread.
 
-Another way it is not only not performant, but also hard to use, are cases where you want to access a list of Component, instead of running a System on one Component at a time. Say you want to find the closest enemy unit. What you want to do is to get a list of all units, filter out the non-enemies, and then find the distance to each one of them, and select the smallest. You can `FindObjectsByType<Unit>` and loop through them, but doing so every frame, possibly many times per frame, is going to be horrendously slow, not even speaking of all the memory allocations it’s going to make. And what if you want to find only the units that have health components? There’s no `FindObjectsByType<Unit, Health>`. So what you do instead is that you create a UnitsManager objects, where units will register themselves, so that you can add them to a list, maybe even a separate list for friendlies and enemies if you know you’re going to be looping through them a lot. And remember to clean out the lists when the objects get destroyed, or you’re going to have NullReferenceExceptions!
+Another way in which it’s not only not performant, but also hard to use, are cases where you want to access a list of components, instead of running a system on one component at a time. Say you want to find the closest enemy unit. What you want to do is to get a list of all units, filter out the non-enemies, and then find the distance to each one of them, and select the smallest. You can `FindObjectsByType<Unit>` and loop through them, but doing so every frame, possibly many times per frame, is going to be horrendously slow, not even speaking of all the memory allocations it’s going to make. And what if you want to find only the units that have health components? There’s no `FindObjectsByType<Unit, Health>`. So what you do instead is that you create a `UnitsManager` object, where units will register themselves, so that you can add them to a list, maybe even a separate list for friendlies and enemies if you know you’re going to be looping through them a lot. And remember to clean out the lists when the objects get destroyed, or you’re going to have `NullReferenceException`s!
 
 Anyway, enough talking about the current state of things. Time to see how it can be done better.
 
 ### A new way of doing ECS
 
-Unity’s new ECS system (called Entities) is not a fixup of this old system, but a radical departure from it, and it wants to fix all of the problems listed above. An Entity is not a class anymore; it’s just a struct with and ID. It requires no allocations, and come with no state. No `Transform`, no name. Just an ID.
+Unity’s new ECS system (called Entities) is not a fixup of this old system, but a radical departure from it, and it wants to fix all of the problems listed above. An entity is not a class anymore; it’s just a struct with and ID. It requires no allocations, and come with no state. No `Transform`, no name. Just an ID.
 
-Components are what we described earlier as the ideal component: it’s just a C# struct with data, that you can attach to Entities. No Update method, no `Awake`/`Start`, it’s just a struct. Want a Component to keep track of health of an Entity? Just make a struct with a float health; and you’re done. Accessing and modifying this health will be done from Systems.
+Components are what we described earlier as the ideal component: it’s just a C# struct with data, that you can attach to Entities. No Update method, no `Awake`/`Start`, it’s just a struct. Want a component to keep track of health of an entity? Just make a struct with a float health; and you’re done. Accessing and modifying this health will be done from systems.
 
-A System in Entities is a struct or a class, with one method that gets invoked at a certain time in each frame. You can’t start Systems from other Systems, you can only schedule them to happen before or after another System. If a System doesn’t access any global state, but instead statically specifies which components it wants to access, it will be able to be run asynchronously in the background. If the System writes new data to Components, other Systems wanting to read from those Components will be scheduled to run after that System has completed. If multiple Systems want read-only access to Component data, they can be scheduled to be run at the same time on different background threads.
+A system in Entities is a struct or a class, with one method that gets invoked at a certain time in each frame. You can’t start systems from other systems, you can only schedule them to happen before or after another system. If a system doesn’t access any global state, but instead statically specifies which components it wants to access, it will be able to be run asynchronously in the background. If the system writes new data to components, other systems wanting to read from those components will be scheduled to run after that system has completed. If multiple systems want read-only access to component data, they can be scheduled to be run at the same time on different background threads.
 
-Whereas in the standard Unity system are desentivized from using a lot of `GetComponent` and `FindObjectsByType`, instead wanting to cache the responses to these, in the Entities ECS, this pattern is actually encouraged. Component data is not scattered around in memory in heap-allocated C# objects; instead they are packed tightly in arrays, making looping over them very efficient and cache-friendly. Say that, as in the previous example, you want to find all objects that have a Unit and Health component, this is as easy as making an `EntityQuery<Unit, Health>`, and then looping over it (syntax-wise it’s not as simple as that, but we’ll get to it). Doing it this way is as efficient as for-looping over an array, since that it essentially what it’s doing. There are also ways to optimize storage further, by chucking the data based on specific properties.
+Whereas in the standard Unity system you are desentivized from using a lot of `GetComponent` and `FindObjectsByType`, instead wanting to cache the responses to these, in the Entities ECS, this pattern is actually encouraged. Component data is not scattered around in memory in heap-allocated C# objects; instead they are packed tightly in arrays, making looping over them very efficient and cache-friendly. Say that, as in the previous example, you want to find all objects that have a `Unit` and `Health` component, this is as easy as making an `EntityQuery<Unit, Health>`, and then looping over it (syntax-wise it’s not as simple as that, but we’ll get to it). Doing it this way is as efficient as for-looping over an array, since that it essentially what it’s doing. There are also ways to optimize storage further, by chucking the data based on specific properties.
 
-This more efficient approach changes the way you want to structure your objects. In the traditional system, you want to chunk things together in bigger components, so you avoid having a lot of references, and potential for nullref-exceptions. Like a Health Component that tracks health, exposes events for health changing, handles unit death, and possibly also defence, blocking, dodging, hit effects, sounds, etc. In Entities ECS, these big Components are very much discouraged. Since splitting things into multiple Component has such a low overhead now, we can instead make a Health Component, a Physical Defence Component, a Component for Magical Defence, Dodge, Block, and so on. Then, the System for dealing damage can find the relevant Components, and if a Component doesn’t exist, use a default value.
+This more efficient approach changes the way you want to structure your objects. In the traditional system, you want to chunk things together in bigger components, so you avoid having a lot of references, and potential for nullref-exceptions. Like a Health component that tracks health, exposes events for health changing, handles unit death, and possibly also defence, blocking, dodging, hit effects, sounds, etc. In Entities ECS, these big components are very much discouraged. Since splitting things into multiple components has such a low overhead now, we can instead make a Health component, a Physical Defence component, a component for Magical Defence, Dodge, Block, and so on. Then, the system for dealing damage can find the relevant components, and if a component doesn’t exist, use a default value.
 
-It’s even encouraged to have empty Component, as a form of Boolean data. Take the `GameObject.SetActive`/`GetActive`/`activeSelf`. In Entities ECS, this active/deactive state is moved out from the Entity to a Component. Entities are considered Active by default, disabling it is just adding a Disabled Component to it (Along with checking for Components on an Entity, adding/removing Components is also very efficient). The Disabled Component is just an empty struct, since just adding the Component communicates everything it needs to. Empty Components are called Tag Components.
+It’s even encouraged to have empty components, as a form of boolean data. Take the `GameObject.SetActive`/`GetActive`/`activeSelf`. In Entities ECS, this active/deactive state is moved out from the entity to a component. Entities are considered active by default, disabling it is just adding a Disabled component to it (Along with checking for components on an Entity, adding/removing components is also very efficient). The Disabled component is just an empty struct, since just adding the component communicates everything it needs to. Empty components are called Tag Components.
 
-One last thing that Entities adds is the ability to run multiple separate Entity-worlds at the same time. In the Traditional ECS, if you create a GameObject with a Health Component, it will always show up in a `FindObjectsByType`, even if it’s in another scene. In Entities ECS, all queries are performed on a World, and you can always just create a new empty World, and add Entities, Components and Systems to that, and it will be completely cut off from all other Worlds.
+One last thing that Entities adds is the ability to run multiple separate Entity-worlds at the same time. In the traditional ECS, if you create a GameObject with a Health component, it will always show up in a `FindObjectsByType`, even if it’s in another scene. In Entities ECS, all queries are performed on a World, and you can always just create a new empty World, and add entities, components and systems to that, and it will be completely cut off from all other Worlds.
 
 ## A basic example of Entities in action
 
 Enough of the theory, it's time to show how to actually use this thing.
 
-### Creaing your first Entity
+### Creaing your first entity
 
-The first thing you need to get the Entities ECS started, other than installing the Entities package, is a World to add your Entities into. You can always just create a new World, but the easiest way is to use the default World, which is accessed statically as `World.DefaultGameObjectInjectionWorld`. From that you can get the EntityManager through the `.entityManager` property. This is what you use to create an Entity:
+The first thing you need to get the Entities ECS started, other than installing the Entities package, is a `World` to add your entities into. You can always just create a new `World`, but the easiest way is to use the default `World`, which is accessed statically as `World.DefaultGameObjectInjectionWorld`. From that you can get the `EntityManager` through the `.EntityManager` property. This is what you use to create an entity:
 
 ```c#
 using Unity.Entities;
@@ -59,13 +61,13 @@ var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
 var entity = entityManager.CreateEntity();
 ```
 
-As simple as that, you now have a new, blank Entity. If you open the Entities Hierarchy window in Unity (Window > Entities > Hierarchy), you will be able to find it in the bottom with a name like `Entity 0:1`. This is how Entities are identified. Entities can be given a name with the SetName method, which is a shorthand for adding a Name Compoent to it. Remember, the Entity itself have no state. It doesn't keep track of its own name or Components. The Entity is just an ID; what Components it has is controlled by the EntityManager. That's why all the methods for querying/modifiying Entities are on the EntityManager, not the Entity itself.
+As simple as that, you now have a new, blank entity. If you open the Entities Hierarchy window in Unity (Window > Entities > Hierarchy), you will be able to find it in the bottom with a name like `Entity 0:1`. This is how entities are identified. Entities can be given a name with the `SetName` method, which is a shorthand for adding a name component to it. Remember, the entity itself has no state. It doesn't keep track of its own name or components. The entity is just an ID; what components it has is controlled by the `EntityManager`. That's why all the methods for querying/modifiying entities are on the `EntityManager`, not the entity itself.
 
 ```c#
 entityManager.SetName(entity, "My First Entity");
 ```
 
-It will now show up in the Entity Hierarchy with that name. If you want to disable it, equvivalent to `gameObject.SetActive(false)`, that's just adding a Disabled component to it:
+It will now show up in the Entity Hierarchy with that name. If you want to disable it, equvivalent to `gameObject.SetActive(false)`, that's just adding a `Disabled` tag-component to it:
 
 ```c#
 entityManager.AddComponent<Disabled>(entity);
@@ -79,7 +81,7 @@ entityManager.RemoveComponent<Disabled>(entity);
 
 ### Creating Entity Components
 
-Creating a component to associate some state with an Entity is just making a struct, that conforms to the IComponentData interface.
+Creating a component to associate some state with an entity is just making a struct, that conforms to the ` IComponentData` interface.
 
 ```c#
 struct Health : IComponentData {
@@ -88,22 +90,22 @@ struct Health : IComponentData {
 }
 ```
 
-And to attach it to your Entity:
+And to attach it to your entity:
 
 ```c#
 entityManager.AddComponentData(entity, new Health { current = 100, max = 100 });
 ```
 
-Notice that if you want to actually provide some starter-data to the component when you add it, you use AddComponentData instead of just AddComponent. The same could be accomplished by:
+Notice that if you want to actually provide some starter-data to the component when you add it, you use `AddComponentData` instead of just `AddComponent`. The same could be accomplished by:
 
 ```c#
 entityManager.AddComponent<Health>(entity);
 entityManager.SetComponentData(entity, new Health { current = 100, max = 100 });
 ```
 
-AddComponentData just checks that a Component doesn't already exist, and SetComponentData checks that it does exist.
+`AddComponentData` just checks that a component doesn't already exist, and `SetComponentData` checks that it does already exist.
 
-To get Component values from an Entity, you use GetComponentData, and you can then change the struct, and apply it via SetComponentData
+To get component values from an entity, you use `GetComponentData`, and you can then change the struct, and apply it via `SetComponentData`.
 
 ```c#
 var health = entityManager.GetComponentData<Health>(entity);
@@ -111,13 +113,13 @@ health.current = 50;
 entityManager.SetComponentData(entity, health);
 ```
 
-And to remove the Health Component from the Entity:
+And to remove the `Health` component from the entity:
 
 ```c#
 entityManager.RemoveComponent<Health>(entity);
 ```
 
-One thing to note with IComponentData structs is that they have to be _blittable_. That means that it has some restrictions on what types you can use, notably no reference-types, meaning no strings, arrays or object references. The alternatives to these are `FixedString#Bytes`, `NativeArray` and `UnityObjectRef`.
+`IComponentData` types doesn’t have to be structs, you can also make class components, and you can keep references to other components or game objects in them. However, as we’ll get to see later, if you want to use them in Burst-optimized, background-scheduled, efficient jobs, then a lot more restrictions will apply, like reference types (classes) being completely banned. 
 
 ### Finding Entity Components
 
