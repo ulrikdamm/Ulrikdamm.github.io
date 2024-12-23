@@ -303,6 +303,37 @@ foreach (var entity in myListOfStoredEntities) {
 
 This won't cause any problems, but if you take a look in the profiler, you will be able to see that the code is actually blocking the main thread if the `HealthSubtractor` job is running. This means no data races, but if `HealthSubtractor` is a heavy, long-running job, it might cause frame stutter if you're waiting for it on the main thread at an unfortunate time (one quick fix could be to move it from Update to LateUpdate, so that at least all other Update methods can run before blocking, but ideally, you want to create a System to do this).
 
+### Conditions for running systems
+
+You can add some conditions for running a system, like specific data existing or having been changed.
+
+If you want a system to only run when entity components with the data you want actually exists by using the `RequireForUpdate` method in `OnCreate`:
+
+```c#
+partial class HealthBarsUpdater : SystemBase {
+    protected override void OnCreate() {
+        RequireForUpdate<Health>();
+    }
+}
+```
+
+This will only start the system when any `Health`s are actually available to be processed, and stop when all the healths have been destroyed. You can get a callback when the system starts and stop by overriding the `OnSystemStarted`/`OnSystemStopped` methods.
+
+One additional benefit of this is a solution related to an Entity Authoring (see below) problem: if you want a system to do some initialization on entities created through a Baker, if you just do that in the system's `OnCreate`, the entities will not be baked in time. By putting a `RequireForUpdate` requirement on the system, you can use `OnSystemStarted` as your entry point where baked entities are ready to use.
+
+You can also put in multiple requirements:
+
+```c#
+partial class HealthBarsUpdater : SystemBase {
+    protected override void OnCreate() {
+        RequireForUpdate<Health>();
+        RequireForUpdate<LocalToWorld>();
+    }
+}
+```
+
+_TODO: Run on changes_
+
 ## ECS transforms
 
 To use ECS transforms, remember to add `using Unity.Transforms;`
@@ -569,3 +600,124 @@ And if we create a system that uses the `LocalToWorld` of an entity, we can make
 partial class SomeSystem : SystemBase {
     ...
 ```
+
+# Random unfinished bits
+
+## Custom Native Collections
+
+```c#
+[NativeContainer]
+public struct SingleIntCollection {
+    public int value;
+    
+    public SingleIntCollection() {
+        value = 0;
+    }
+}
+```
+
+## Atomic Safety Handles
+
+When creating custom native collections, one of the things making it a true "native" container (in DOTS-parlance) is participating in jobs-scheduling. This means that when a job is scheduled, that references your collection, it registers that it's using it, and other scheduled jobs wanting to use the same data must patiently wait. This also includes things like allowing multiple jobs ReadOnly access to the data, while blocking ReadWrite/WriteOnly access until all the ReadOnly jobs have completed.
+
+Participating in this system is done through an `AtomicSafetyHandle`. Your struct must include a field of type `AtomicSafetyHandle` that is named exactly `m_Safety`, and initialize it something like this:
+
+```c#
+[NativeContainer]
+public struct SingleIntCollection {
+    AtomicSafetyHandle m_Safety;
+    
+    public int value;
+    
+    public SingleIntCollection(AllocatorManager.AllocatorHandle allocator) {
+        m_Safety = CollectionHelper.CreateSafetyHandle(allocator.Handle);
+        value = 0;
+    }
+}
+```
+
+Having this, your collection will participate in the job-scheduling system.
+
+Another use of this is to set up checks that your collection is being used correctly. While just having the `m_Safety` field will make it part of the job scheduling, nothing will prevent a user from just accessing and modifying stuff while a job is using it on a worker thread, causing data races. For this, you'll have to do some checking yourself every time any data is being read or manipulated:
+
+```c#
+[NativeContainer]
+public struct SingleIntCollection {
+    AtomicSafetyHandle m_Safety;
+    
+    int _value;
+    
+    public int value {
+        get {
+            AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
+            return _value;
+        }
+        set {
+            AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
+            _value = value;
+        }
+    }
+    
+    public SingleIntCollection(AllocatorManager.AllocatorHandle allocator) {
+        m_Safety = CollectionHelper.CreateSafetyHandle(allocator.Handle);
+        _value = 0;
+    }
+}
+```
+
+Every time `value` is read, we want to call `CheckReadAndThrow`, which will check that the collection is not in use somewhere else, and throw and exception if it is, and every time `value` is written to, we want to call `CheckWriteAndThrow`.
+
+One things you might want to do, though, is to avoid these checks during runtime. Having them while debugging is nice and well, but having a check on every read and every write can slow things down, and we're not using DOTS to not make things go fast. To achieve this, we move the checks to separate methods, marked with the `Conditional` attribute (found in `System.Diagnostics`), which will only get included if safety checks are turned on.
+
+```c#
+[NativeContainer]
+public struct SingleIntCollection {
+    AtomicSafetyHandle m_Safety;
+    
+    int _value;
+    
+    public int value {
+        get {
+            checkReadAccess();
+            return _value;
+        }
+        set {
+            checkWriteAccess();
+            _value = value;
+        }
+    }
+    
+    public SingleIntCollection(AllocatorManager.AllocatorHandle allocator) {
+        m_Safety = CollectionHelper.CreateSafetyHandle(allocator.Handle);
+        _value = 0;
+    }
+    
+    [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+    void checkReadAccess() {
+        AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
+    }
+    
+    [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+    void checkWriteAccess() {
+        AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
+    }
+}
+```
+
+## Disposing
+
+```c#
+if (!AtomicSafetyHandle.IsDefaultValue(in m_Safety)) {
+    AtomicSafetyHandle.CheckExistsAndThrow(in m_Safety);
+}
+
+CollectionHelper.DisposeSafetyHandle(ref m_Safety);
+```
+
+## Sheduled disposal
+
+## Allocation/unsafe buffers
+
+# Important points to include somewhere
+
+If you look up components with EntityManager.GetComponent, if there's a system using that component, the lookup is going to throw an exception. Use EntityQuery.CompelteDependency().
