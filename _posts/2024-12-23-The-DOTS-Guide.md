@@ -54,7 +54,7 @@ One handy thing I use to avoid forgetting to dispose collections is to (ab-)use 
 
 ```c#
 using (var array = myArray) {
-	
+    
 } // NativeArray.Dispose is automatically called here
 ```
 
@@ -62,10 +62,10 @@ Another slightly newer thing you can do is to have it be disposed at the end of 
 
 ```c#
 void doSomething() {
-	var myArray = new NativeArray<int>(length: 10, Allocator.Temp);
-	using var autoDisposeArray = myArray;
-	
-	...
+    var myArray = new NativeArray<int>(length: 10, Allocator.Temp);
+    using var autoDisposeArray = myArray;
+    
+    ...
 } // NativeArray.Dispose is automatically called here
 ```
 
@@ -84,9 +84,9 @@ Creating a simple job is fairly easy. All jobs are structs that implements the `
 using Unity.Jobs;
 
 struct MyJob : IJob {
-	public void Execute() {
-		Debug.Log("Running in a job!");
-	}
+    public void Execute() {
+        Debug.Log("Running in a job!");
+    }
 }
 ```
 
@@ -111,13 +111,13 @@ To actually pass some data in to the job, and have it do something useful, we ad
 
 ```c#
 struct SumJob : IJob {
-	public int valueA;
-	public int valueB;
-	
-	public void Execute() {
-		var sum = valueA + valueB;
-		Debug.Log($"Sum: {sum}");
-	}
+    public int valueA;
+    public int valueB;
+    
+    public void Execute() {
+        var sum = valueA + valueB;
+        Debug.Log($"Sum: {sum}");
+    }
 }
 
 var job = new SumJob { valueA = 10, valueB = 20 };
@@ -127,13 +127,13 @@ What you can't do is modify these fields, and expect them to keep the changes wh
 
 ```c#
 struct SumJob : IJob {
-	public int valueA;
-	public int valueB;
-	public int outSum;
-	
-	public void Execute() {
-		outSum = valueA + valueB;
-	}
+    public int valueA;
+    public int valueB;
+    public int outSum;
+    
+    public void Execute() {
+        outSum = valueA + valueB;
+    }
 }
 
 var job = new SumJob { valueA = 10, valueB = 20 };
@@ -147,13 +147,13 @@ To pass data out, you must use a native collection. Passing native collections a
 
 ```c#
 struct SumJob : IJob {
-	public int valueA;
-	public int valueB;
-	public NativeReference<int> outSum;
-	
-	public void Execute() {
-		outSum.Value = valueA + valueB;
-	}
+    public int valueA;
+    public int valueB;
+    public NativeReference<int> outSum;
+    
+    public void Execute() {
+        outSum.Value = valueA + valueB;
+    }
 }
 
 var job = new SumJob { valueA = 10, valueB = 20, outSum = new NativeReference<int>(Allocator.TempJob) };
@@ -166,25 +166,25 @@ job.outSum.Dispose();
 
 Now that the native collection is used in a job, we have to use the `TempJob` allocator, and we also have to remember to dispose it after the job is done!
 
-If we want to sum an arbitrary list of numbers, we also can't pass in a normal C# Array, but have to use a NativeArray instead:
+If we want to sum an arbitrary list of numbers, we also can't pass in a normal C# Array, but have to use a `NativeArray` instead:
 
 ```c#
 struct SumJob : IJob {
-	public NativeArray<int> values;
-	public NativeReference<int> outSum;
-	
-	public void Execute() {
-		outSum.Value = 0;
-		
-		for (var i = 0; i < values.Length; i++) {
-			outSum.Value += values[i];
-		}
-	}
+    public NativeArray<int> values;
+    public NativeReference<int> outSum;
+    
+    public void Execute() {
+        outSum.Value = 0;
+        
+        for (var i = 0; i < values.Length; i++) {
+            outSum.Value += values[i];
+        }
+    }
 }
 
 var job = new SumJob {
-	values = new NativeArray<int>(length: 3, Allocator.TempJob),
-	outSum = new NativeReference<int>(Allocator.TempJob)
+    values = new NativeArray<int>(length: 3, Allocator.TempJob),
+    outSum = new NativeReference<int>(Allocator.TempJob)
 };
 
 job.values[0] = 10;
@@ -209,7 +209,7 @@ using Unity.Burst;
 
 [BurstCompile]
 struct SumJob : IJob {
-	...
+    ...
 }
 ```
 
@@ -257,9 +257,9 @@ To let the Job System know that you're only going to read from some data, you ca
 
 ```c#
 struct CalculateDistancesJob : IJob {
-	[ReadOnly] public NativeArray<Vector3> waypoints;
-	
-	...
+    [ReadOnly] public NativeArray<Vector3> waypoints;
+    
+    ...
 }
 ```
 
@@ -273,21 +273,21 @@ Even though the wayponints code before runs in the background, we still end up w
 
 ```c#
 void Update() {
-	var waypointDistancesJob = new WaypointDistancesJob {
-		waypoints = new NativeArray<Vector3>(waypoints.Length, Allocator.TempJob),
-		outDistances = new NativeArray<float>(waypoints.Length, Allocator.TempJob)
-	};
-	waypointDistancesJob.waypoints.CopyFrom(waypoints);
-	
-	var waypointDistancesJobHandle = waypointDistancesJob.Schedule();
-	
-	// Do some other work here
-	
-	waypointDistancesJobHandle.Complete();
-	destination = selectWaypoint(waypoints, waypointDistancesJob.outDistances);
-	
-	waypointDistancesJob.waypoints.Dispose();
-	waypointDistancesJob.outDistances.Dispose();
+    var waypointDistancesJob = new WaypointDistancesJob {
+        waypoints = new NativeArray<Vector3>(waypoints.Length, Allocator.TempJob),
+        outDistances = new NativeArray<float>(waypoints.Length, Allocator.TempJob)
+    };
+    waypointDistancesJob.waypoints.CopyFrom(waypoints);
+    
+    var waypointDistancesJobHandle = waypointDistancesJob.Schedule();
+    
+    // Do some other work here
+    
+    waypointDistancesJobHandle.Complete();
+    destination = selectWaypoint(waypoints, waypointDistancesJob.outDistances);
+    
+    waypointDistancesJob.waypoints.Dispose();
+    waypointDistancesJob.outDistances.Dispose();
 }
 ```
 
@@ -297,34 +297,34 @@ If you have a very long running job, like doing pathfinding, mesh generation, or
 
 ```c#
 public class PathfindingUnit : MonoBehaviour {
-	PathfindingJob pathfindingJob;
-	JobHandle pathfindingJobHandle;
-	
-	const int maxPathLength = 512;
-	
-	public void setDestination(Vector3 destination) {
-		pathfindingJob = new PathfindingJob();
-		pathfindingJob.destination = destination;
-		pathfindingJob.pathLength = new NativeReference<int>(Allocator.TempJob);
-		pathfindingJob.pathBuffer = new NativeArray<int>(length: maxPathLength, Allocator.TempJob)
-		pathfindingJobHandle = pathfindingJob.Schedule();
-	}
-	
-	void Update() {
-		if (pathfindingJobHandle != default && pathfindingJobHandle.IsComplete) {
-			path = pathfindingJob.pathBuffer.Slice(0, pathfindingJob.pathLength.Value).ToArray();
-			beingPath(path);
-			
-			pathfindingJob.pathLength.Dispose();
-			pathfindingJob.pathBuffer.Dispose();
-			pathfindingJob = default;
-			pathfindingJobHandle = default;
-		}
-	}
-	
-	void beginPath(Vector3[] path) {
-		...
-	}
+    PathfindingJob pathfindingJob;
+    JobHandle pathfindingJobHandle;
+    
+    const int maxPathLength = 512;
+    
+    public void setDestination(Vector3 destination) {
+        pathfindingJob = new PathfindingJob();
+        pathfindingJob.destination = destination;
+        pathfindingJob.pathLength = new NativeReference<int>(Allocator.TempJob);
+        pathfindingJob.pathBuffer = new NativeArray<int>(length: maxPathLength, Allocator.TempJob)
+        pathfindingJobHandle = pathfindingJob.Schedule();
+    }
+    
+    void Update() {
+        if (pathfindingJobHandle != default && pathfindingJobHandle.IsComplete) {
+            path = pathfindingJob.pathBuffer.Slice(0, pathfindingJob.pathLength.Value).ToArray();
+            beingPath(path);
+            
+            pathfindingJob.pathLength.Dispose();
+            pathfindingJob.pathBuffer.Dispose();
+            pathfindingJob = default;
+            pathfindingJobHandle = default;
+        }
+    }
+    
+    void beginPath(Vector3[] path) {
+        ...
+    }
 }
 ```
 
@@ -334,25 +334,25 @@ Let’s take a look at how to convert a piece of code to be jobified. Let's say 
 
 ```c#
 Unit nearestReachableEnemy(Unit forUnit, Unit[] units) {
-	var minDistance = float.MaxValue;
-	Unit closestUnit = null;
-	
-	foreach (var unit in units) {
-		if (unit == forUnit) { continue; }
-		if (!GameManager.instance.areUnitsEnemies(forUnit, unit)) { continue; }
-		
-		var distance = Vector3.Distance(position, unit.transform.position);
-		if (distance < minDistance) {
-			minDistance = distance;
-			closestUnit = unit;
-		}
-	}
-	
-	return closestUnit;
+    var minDistance = float.MaxValue;
+    Unit closestUnit = null;
+    
+    foreach (var unit in units) {
+        if (unit == forUnit) { continue; }
+        if (!GameManager.instance.areUnitsEnemies(forUnit, unit)) { continue; }
+        
+        var distance = Vector3.Distance(position, unit.transform.position);
+        if (distance < minDistance) {
+            minDistance = distance;
+            closestUnit = unit;
+        }
+    }
+    
+    return closestUnit;
 }
 
 void Update() {
-	targetEnemy = nearestReachableEnemy(forUnit: this, GameManager.instance.allUnits);
+    targetEnemy = nearestReachableEnemy(forUnit: this, GameManager.instance.allUnits);
 }
 ```
 
@@ -383,70 +383,70 @@ The last issue is that jobs can't return values. What we can do instead is to re
 ```c#
 // The implementation of the method, in job form
 struct NearestEnemyJob : IJob {
-	// This doesn't need [ReadOnly], since it's not a collection type, and it's going to be copied no matter what.
-	public int unitIndex;
-	
-	// Our prepared input, marked as read-only
-	[ReadOnly] public NativeArray<Vector3> unitPositions;
-	[ReadOnly] public NativeArray<bool> isUnitEnemy;
-	
-	// Our output, marked as WriteOnly
-	[WriteOnly] public NativeReference<int> outEnemyIndex;
-	
-	public void Execute() {
-		var unitPosition = unitPositions[unitIndex];
-		
-		var minDistance = float.MaxValue;
-		int? closestUnitIndex = null;
-		
-		for (var i = 0; i < unitPositions.Length; i++) {
-			if (i == unitIndex) { continue; }
-			if (!isUnitEnemy[i]) { continue; }
-			
-			var distance = Vector3.Distance(unitPosition, unitPositions[i]);
-			if (distance < minDistance) {
-				minDistance = distance;
-				closestUnitIndex = i;
-			}
-		}
-		
-		outEnemyIndex = closestUnitIndex ?? -1;
-	}
+    // This doesn't need [ReadOnly], since it's not a collection type, and it's going to be copied no matter what.
+    public int unitIndex;
+    
+    // Our prepared input, marked as read-only
+    [ReadOnly] public NativeArray<Vector3> unitPositions;
+    [ReadOnly] public NativeArray<bool> isUnitEnemy;
+    
+    // Our output, marked as WriteOnly
+    [WriteOnly] public NativeReference<int> outEnemyIndex;
+    
+    public void Execute() {
+        var unitPosition = unitPositions[unitIndex];
+        
+        var minDistance = float.MaxValue;
+        int? closestUnitIndex = null;
+        
+        for (var i = 0; i < unitPositions.Length; i++) {
+            if (i == unitIndex) { continue; }
+            if (!isUnitEnemy[i]) { continue; }
+            
+            var distance = Vector3.Distance(unitPosition, unitPositions[i]);
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestUnitIndex = i;
+            }
+        }
+        
+        outEnemyIndex = closestUnitIndex ?? -1;
+    }
 }
 
 // Same method as before, but the guts has been switched out with a job-invocation
 Unit nearestReachableEnemy(Unit forUnit, Unit[] units) {
-	// Creating the job and allocating collections
-	var job = new NearestEnemyJob {
-		unitIndex = units.IndexOf(forUnit),
-		unitPositions = new NativeArray<Vector3>(units.Length, Allocator.TempJob),
-		isUnitEnemy = new NativeArray<bool>(units.Length, Allocator.TempJob),
-		outEnemyIndex = new NativeReference<int>(Allocator.TempJob)
-	};
-	
-	// Copying all the data we need, that we can't access in a job
-	for (var i = 0; i < units.Length; i++) {
-		job.unitPositions[i] = units[i].transform.position;
-		job.isUnitEnemy = GameManager.instance.areUnitsEnemies(forUnit, units[i]);
-	}
-	
-	// Running the job
-	job.Run();
-	
-	// Getting out the result
-	var result = (job.outEnemyIndex < 0 ? null : units[job.outEnemyIndex]);
-	
-	// Disposing all the collections we allocated earlier
-	job.unitPositions.Dispose();
-	job.isUnitEnemy.Dispose();
-	job.outEnemyIndex.Dispose();
-	
-	return result;
+    // Creating the job and allocating collections
+    var job = new NearestEnemyJob {
+        unitIndex = units.IndexOf(forUnit),
+        unitPositions = new NativeArray<Vector3>(units.Length, Allocator.TempJob),
+        isUnitEnemy = new NativeArray<bool>(units.Length, Allocator.TempJob),
+        outEnemyIndex = new NativeReference<int>(Allocator.TempJob)
+    };
+    
+    // Copying all the data we need, that we can't access in a job
+    for (var i = 0; i < units.Length; i++) {
+        job.unitPositions[i] = units[i].transform.position;
+        job.isUnitEnemy = GameManager.instance.areUnitsEnemies(forUnit, units[i]);
+    }
+    
+    // Running the job
+    job.Run();
+    
+    // Getting out the result
+    var result = (job.outEnemyIndex < 0 ? null : units[job.outEnemyIndex]);
+    
+    // Disposing all the collections we allocated earlier
+    job.unitPositions.Dispose();
+    job.isUnitEnemy.Dispose();
+    job.outEnemyIndex.Dispose();
+    
+    return result;
 }
 
 // This is completely unchanged
 void Update() {
-	targetEnemy = nearestReachableEnemy(forUnit: this, GameManager.instance.allUnits);
+    targetEnemy = nearestReachableEnemy(forUnit: this, GameManager.instance.allUnits);
 }
 ```
 
@@ -459,37 +459,37 @@ So far we've only looked at jobs that run a single method in the background, and
 
 ```c#
 struct CalculatePairSumsJob : IJobParallelFor {
-	[ReadOnly] NativeArray<int> valuesA;
-	[ReadOnly] NativeArray<int> valuesB;
-	[WriteOnly] NativeArray<int> sums;
-	
-	public void Execute(int index) {
-		sums[index] = valuesA[index] + valuesB[index];
-	}
+    [ReadOnly] NativeArray<int> valuesA;
+    [ReadOnly] NativeArray<int> valuesB;
+    [WriteOnly] NativeArray<int> sums;
+    
+    public void Execute(int index) {
+        sums[index] = valuesA[index] + valuesB[index];
+    }
 }
 
 int[] calculateSums(int[] valuesA, int[] valuesB) {
-	Debug.Assert(valuesA.Length == valuesB.Length);
-	
-	var job = new CalculatePairSumsJob();
-	
-	CalculatePairSumsJob.valuesA = new NativeArray<int>(length: valuesA.Length, Allocator.TempJob);
-	CalculatePairSumsJob.valuesA.CopyFrom(valuesA);
-	
-	CalculatePairSumsJob.valuesB = new NativeArray<int>(length: valuesB.Length, Allocator.TempJob);
-	CalculatePairSumsJob.valuesB.CopyFrom(valuesB);
-	
-	CalculatePairSumsJob.sums = new NativeArray<int>(length: valuesA.Length, Allocator.TempJob);
-	
-	job.Schedule(valuesA.Length, innerLoopBatchCount: 32).Complete();
-	
-	var sums = CalculatePairSumsJob.sums.ToArray();
-	
-	CalculatePairSumsJob.valuesA.Dispose();
-	CalculatePairSumsJob.valuesB.Dispose();
-	CalculatePairSumsJob.sums.Dispose();
-	
-	return sums;
+    Debug.Assert(valuesA.Length == valuesB.Length);
+    
+    var job = new CalculatePairSumsJob();
+    
+    CalculatePairSumsJob.valuesA = new NativeArray<int>(length: valuesA.Length, Allocator.TempJob);
+    CalculatePairSumsJob.valuesA.CopyFrom(valuesA);
+    
+    CalculatePairSumsJob.valuesB = new NativeArray<int>(length: valuesB.Length, Allocator.TempJob);
+    CalculatePairSumsJob.valuesB.CopyFrom(valuesB);
+    
+    CalculatePairSumsJob.sums = new NativeArray<int>(length: valuesA.Length, Allocator.TempJob);
+    
+    job.Schedule(valuesA.Length, innerLoopBatchCount: 32).Complete();
+    
+    var sums = CalculatePairSumsJob.sums.ToArray();
+    
+    CalculatePairSumsJob.valuesA.Dispose();
+    CalculatePairSumsJob.valuesB.Dispose();
+    CalculatePairSumsJob.sums.Dispose();
+    
+    return sums;
 }
 ```
 
