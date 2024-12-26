@@ -14,7 +14,7 @@ dl, dd, ol, ul, figure {
  * Basic styling
  */
 body {
-  font: $base-font-weight #{$base-font-size}/#{$base-line-height} $base-font-family;
+  // font: $base-font-weight #{$base-font-size}/#{$base-line-height} $base-font-family;
   color: $text-color;
   background-color: $background-color;
   -webkit-text-size-adjust: 100%;
@@ -28,6 +28,17 @@ body {
   flex-direction: column;
 }
 
+@media screen {
+  body {
+    font: $base-font-weight #{$base-font-size}/#{$base-line-height} $base-font-family;
+  }
+}
+
+@media print {
+  body {
+    font: $base-font-weight #{$base-font-size-print}/#{$base-line-height} $base-font-family;
+  }
+}
 
 
 /**
@@ -153,6 +164,10 @@ code {
   border-radius: 3px;
   background-color: #eef;
   font-size: $code-font-size;
+  
+  @media print {
+    @include relative-font-size-print(0.9375);
+  }
 }
 
 code {

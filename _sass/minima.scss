@@ -3,7 +3,7 @@
 // Define defaults for each variable.
 
 //$base-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol" !default;
-$base-font-family: -apple-system-ui-serif, ui-serif, 'Georgia', serif;
+$base-font-family: -apple-system-ui-serif, ui-serif, 'Georgia', serif;  
 $base-font-size:   20px !default;
 $base-font-size-print: 14px !default;
 $base-font-weight: 100 !default;
@@ -32,6 +32,8 @@ $content-width:    800px !default;
 $on-palm:          600px !default;
 $on-laptop:        800px !default;
 
+
+
 // Use media queries like this:
 // @include media-query($on-palm) {
 //   .wrapper {
@@ -45,13 +47,12 @@ $on-laptop:        800px !default;
   }
 }
 
+@mixin relative-font-size-print($ratio) {
+  font-size: $base-font-size-print * $ratio;
+}
+
 @mixin relative-font-size($ratio) {
-  @media screen {
     font-size: $base-font-size * $ratio;
-  }
-  @media print {
-    font-size: $base-font-size-print * $ratio;
-  }
 }
 
 // Import partials.

@@ -22,6 +22,10 @@
   &:visited {
     color: $grey-color-dark;
   }
+  
+  @media print {
+    @include relative-font-size-print(1.625);
+  }
 }
 
 .site-nav {
@@ -97,6 +101,10 @@
       }
       margin-left: 20px;
     }
+  }
+  
+  @media print {
+    display: none;
   }
 }
 
@@ -224,6 +232,10 @@
   @include media-query($on-laptop) {
     @include relative-font-size(2.25);
   }
+  
+  @media print {
+    @include relative-font-size-print(2.625);
+  }
 }
 
 .post-content {
@@ -235,6 +247,10 @@
     @include media-query($on-laptop) {
       @include relative-font-size(1.75);
     }
+    
+    @media print {
+      @include relative-font-size-print(2);
+    }
   }
 
   h3 {
@@ -243,6 +259,10 @@
     @include media-query($on-laptop) {
       @include relative-font-size(1.375);
     }
+    
+    @media print {
+      @include relative-font-size-print(1.625);
+    }
   }
 
   h4 {
@@ -250,6 +270,10 @@
 
     @include media-query($on-laptop) {
       @include relative-font-size(1.125);
+    }
+    
+    @media print {
+      @include relative-font-size-print(1.25);
     }
   }
 }
