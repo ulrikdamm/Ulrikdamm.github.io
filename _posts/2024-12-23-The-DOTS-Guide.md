@@ -684,11 +684,133 @@ healths.Dispose();
 defences.Dispose();
 ```
 
-Even though this is very possible, for the most part, you won't actually be executing queries manually. Instead, you'll be creating Systems that runs once per frame. The systems will have some handy methods for more easily creating queries.
+One good thing to know about entity queries is that `ToComponentDataArray` might be a blocking operation. As we'll see later, we'll be able to run asyncronous jobs on entity component data. If you run `ToComponentDataArray` on an entity query while there's a background job modifying values of components we're trying to query, this method will block, and wait for that job to finish, before it can safely read the component data, and return the array. Actually, as we've created them now, even a background job just reading the component data will block the `ToComponentDataArray`; this is because it's assumed by default that we want read/write access to the data in the query. That's why, if we just query the data to read it, it's good to specify that we want just read-only access to the components. This is done with this syntax:
+
+```c#
+var query = entities.CreateEntityQuery(ComponentType.ReadOnly<Health>(), ComponentType.ReadOnly<Defence>());
+```
+
+Even though it's very possible to execute queries like this, for the most part, you won't actually be executing queries manually. Instead, you'll be creating jobs that'll run for each entity in a query. Let's see how!
+
+### Entity jobs
+
+To actually run some code per entity, you can use an `EntityQuery` like before, but instead of using it directly, use it instead to run a Job System job for each entry (Now's the time to check out the Job System section above, if you skipped it). To create a job for running on entity data, you create an `IJobEntity`. I works a lot like `IJobParallelFor`, but in its Execute method, instead of just getting an array index, you get the components you want of the current entity in the list:
+
+```c#
+struct HealthLoggerJob : IJobEntity {
+    public void Execute(in Health health) {
+        Debug.Log($"Entity has {health.current}/{health.max} health");
+    }
+}
+```
+
+Notice the `in` keyword on the Health parameter. This is to indicate that you want read-only access to the health component. Remember that jobs really want to know wether you want read-only or read-write access to data, so that the Job System can schedule them most efficiently. In this case, we just want to print out the health, so we specify `in`. If we wanted to modify the value of the health component, we would instead specify it as `ref`, and any modifications we'd do to it would be updated in the entity's component.
+
+To run the job, we create and schedule it as normal. We'll pass in the query to `Schedule`, so it knows what to iterate over:
+
+```c#
+var query = entities.CreateEntityQuery(ComponentType.ReadOnly<Health>());
+var job = new HealthLoggerJob();
+job.Schedule(query).Complete();
+```
+
+But actually, if we omit the query parameter, the job can itself look at the parameters you've specified in the Execute method of the job, and automatically create an entity query that matches! So the above is the same as just writing:
+
+```c#
+var job = new HealthLoggerJob();
+job.Schedule().Complete();
+```
+
+This is going to execute the job on all entities with a Health component, and `Debug.Log` their values. It's going to do it in the background, since it's `Schedule`d, but we can actually very easily do it in parallel as well, just like an `IJobParallelFor`, we just need to switch out the normal `Schedule` for `ScheduleParallel`:
+
+```c#
+var job = new HealthLoggerJob();
+job.ScheduleParallel().Complete();
+```
+
+To create a job that reads multiple components, you can just add more parameters to the Execute method:
+
+```c#
+struct HealthLoggerJob : IJobEntity {
+    public void Execute(in Health health, in Defence defence) {
+        Debug.Log($"Entity has {health.current}/{health.max} health and {defence.physical} physical defence");
+    }
+}
+```
+
+And to create a job that actually modifies the data, we just change `in` to `ref`:
+
+```c#
+struct HealOverTimeJob : IJobEntity {
+    public float deltaTime;
+    
+    public void Execute(ref Health health, in HealthRegen regen) {
+        health.current = Mathf.Clamp(health.current + regen.healthPerSecond * deltaTime, min: 0, max: health.max);
+    }
+}
+```
+
+This job will increase the health of all entities that has a `Health` and a `HealthRegen` component. If they have none or only one of them, the job won't execute. They can have more, unrelated components though, you'll just only get access to the ones you need.
+
+Now say you want to create a job that not only accesses data for one entity, but wants access to multiple entities, say a job that, for each unit, finds the closest enemy unit. Now each `Execute` of the job needs access to the full list of units. We can't do entity queries inside of jobs; jobs can't access global state, they need all the data they're going to use up front. What we'll have to do in this case is to create an entity query for the data we need to pass in, and use `ToComponentDataArray` to get the data as a `NativeArray`, so we can pass it along into the job:
+
+```c#
+using Unity.Transforms;
+
+struct FindNearestEnemyJob : IJobEntity {
+    [ReadOnly] public NativeArray<Entity> unitEntities;
+    [ReadOnly] public NativeArray<LocalToWorld> unitTransforms;
+    [ReadOnly] public NativeArray<UnitAllegiance> unitAllegiances;
+    
+    public void Execute(in LocalToWorld transform, in UnitAllegiance allegiance, ref UnitTargeting targeting) {
+        var minDistance = float.MaxValue;
+        int? resultIndex = null;
+        
+        for (var i = 0; i < unitTransforms.Length; i++) {
+            if (!allegiance.isEnemy(unitAllegiances[i])) { continue; }
+            
+            var distance = Vector3.Distance(transform.Position, unitTransforms[i].Position);
+            
+            if (distance < minDistance) {
+                minDistance = distance;
+                resultIndex = i;
+            }
+        }
+        
+        targeting.hasTarget = resultIndex.HasValue;
+        targeting.target = (resultIndex.HasValue ? unitEntities[resultIndex.Value] : default);
+    }
+}
+
+var unitsQuery = entities.CreateEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<UnitAllegiance>());
+var unitEntities = unitsQuery.ToEntityArray(Allocator.TempJob);
+var unitTransforms = unitsQuery.ToComponentDataArray<LocalToWorld>(Allocator.TempJob);
+var unitAllegiances = unitsQuery.ToComponentDataArray<UnitAllegiance>(Allocator.TempJob);
+
+new FindNearestEnemyJob {
+    unitEntities = unitEntities,
+    unitTransforms = unitTransforms,
+    unitAllegiances = unitAllegiances
+}.ScheduleParallel().Complete();
+
+unitEntities.Dispose();
+unitTransforms.Dispose();
+unitAllegiances.Dispose();
+```
+
+Here we have a unit as an entity with a UnitAllegiance component, to specify if they're friend or foe, and a UnitTargeting component, with a `bool hasTarget`/`Entity target` pair, to hold data about the current target of each unit. The `FindNearestEnemy` job will, for each unit, go through each other unit, find the closest enemy, and assign that as its target. Notice that the `UnitTargeting` component is marked as `ref`, allowing us to write to it. Usually the way to "return" values from entity jobs is to write the result into a component on each entity.
+
+Also to note is the `LocalToWorld` component, which is the entities-equivalent of the `Transform` component. We'll get back to entity transforms later.
+
+Another small thing is that you can use the `ToEntityArray` method on entity query to get an array of all the entities matched by the query. All `ToXArray` methods on the query will always return a list with the length of the number of entities matched by the query, so an index into `unitEntities` will match an index into `unitTransforms` and `unitAllegiances`. 
+
+Running this piece of code will assign all the resulting values into the targeting component of each unit entity. If you create a few units and run the system, you should be able to find them in the Entities Hierarchy window, and inspect them, to see that they get a target assigned.
+
+But when to run this job? This is not something we just want to run once in the start of the game. We really want it to run every frame, to update targeting information of each unit. Of course we could create a new `MonoBehaviour` subclass and run this code in `Update()`, but this has the problem of needing to `.Complete()` the job before returning. Otherwise we would be able to schedule other jobs reading or writing the same data, because we'd need to set up dependencies between the jobs. We could have some central class to manage all dependencies, but there's a better way: creating Systems.
 
 ### Creating Systems
 
-To actually add some logic to this, like `Debug.log`ing the health every frame, we create a System that works on `Health`s. The easiest way to create a System is to make a class that subclasses `SystemBase`.
+The easiest way to create a System is to make a class that subclasses `SystemBase`.
 
 ```c#
 partial class HealthLogger : SystemBase {
@@ -701,5 +823,3 @@ partial class HealthLogger : SystemBase {
 `SystemBase` has two requirements of its subclasses: it must implement the `OnUpdate` method, which is the method that will get called when the System runs, and the class must be a `partial` class (this is just an implementation detail in how the ECS is implemented).
 
 There's no need to register or start the System, it will automatically be detected, and added to the update loop. So just adding this class to your project will start executing `OnUpdate` once each frame.
-
-To actually run some code per component, you can use an `EntityQuery` like before, but instead of using it directly, use it instead to run a Job System job for each entry (Now's the time to check out the Job System section above, if you skipped it).
