@@ -5,6 +5,7 @@
 //$base-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol" !default;
 $base-font-family: -apple-system-ui-serif, ui-serif, 'Georgia', serif;
 $base-font-size:   20px !default;
+$base-font-size-print: 14px !default;
 $base-font-weight: 100 !default;
 $small-font-size:  $base-font-size * 0.875 !default;
 $base-line-height: 1.6 !default;
@@ -45,7 +46,12 @@ $on-laptop:        800px !default;
 }
 
 @mixin relative-font-size($ratio) {
-  font-size: $base-font-size * $ratio;
+  @media screen {
+    font-size: $base-font-size * $ratio;
+  }
+  @media print {
+    font-size: $base-font-size-print * $ratio;
+  }
 }
 
 // Import partials.
