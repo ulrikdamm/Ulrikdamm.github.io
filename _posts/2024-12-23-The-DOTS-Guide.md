@@ -18,7 +18,9 @@ The term DOTS cover a few different projects, the primary ones being the Job Sys
 - The Entities package is a new way to do ECS as an alternative to GameObjects and MonoBehaviours. It’s doing away with the object oriented thinking, replacing it with a systems based approach, allowing many times more entities to exist.
 
 These packages together creates a whole new way of structuring your projects, and unlocks performance that was not feasible before.
+
 Of course, you can just go and delete your game project you’ve been working on for the past three years and start all over in a pure DOTS codebase, but in reality, most of us would not like to have to completely rewrite all our code. The good news is that all this can be added to your project incrementally. Usually, the reason you want to start using DOTS is because parts of your game is slow, and you want to use DOTS to speed it up. Maybe you have just one method that is running painfully slow. For that, you can turn it into a Job, Burst-optimize it, and that’s it. You don’t have to completely convert all your code, you can just use it in this one place, and the rest of your project can be good old normal Unity code. Or you might be struggling with a lot of Update methods taking up precious frame time, even though they don’t do much; you can convert them to entities, and turn all those Update calls into a a single Job System.
+
 While you *can* use each of these packages by themselves, in reality the Burst Compiler is mainly made for optimizing Jobs, the Native Collections are mostly for passing data in and out of jobs, and the Entities systems are very much made for running Jobs, so the Job System/Native Collections/Burst Compiler trio is the most fundamental part of DOTS, so this is where our guide will begin. After this, we’ll finally get to creating entities.
 Alright, enough preamble, let’s start writing some fast code!
 
@@ -74,6 +76,7 @@ This way the array is always disposed when the method returns, no matter where i
 ## The Job System
 
 The Job System is a package that allows you to create jobs, which are pieces of code that can’t access global state, but are instead confined to using only the input and output you’ve specified. This constraint allows the job to be run in the background, off of the main thread where all your usual logic happens, unlocking the multicore potential of the machine.
+
 Normally if you’d want to run code in the background, you’d have to create a new thread, and then manually keep track of what is being read and written on that and all other threads, to avoid data races. For jobified code, this is not a concern. The system will take care of all those problems for you. If you schedule two jobs to write to the same data, the system will produce an error, and tell you to schedule them to run sequentially.
 
 ### Creating a simple Job
@@ -214,6 +217,7 @@ struct SumJob : IJob {
 ```
 
 That's all you need to do. When you run it now, it should appear in the profiler in a green color instead of the normal blue color, that is, if you can even find it. Burst-compiling jobs can make them so fast that they basically complete in no time, and turn into a tiny sliver of a bar in the profiler.
+
 That's pretty much all there is to it. The only rinkle is that Burst-compiled jobs are harder to debug than non-Bursted jobs. Exception support is limited, stack traces are harder to read, string formatting is more limited, etc. So when you want to debug a job, it makes sense to temporarily turn off Burst. Burst can be turned off completely from the Jobs menu (Jobs > Enable Burst Compilation).
 
 ### Job scheduling & dependencies
@@ -252,6 +256,7 @@ sortJobHandle.Complete();
 ```
 
 This way, the `CalculateDistancesJob` and `CalculateAccessiblityJob` will run at the same time in parallel on different threads, and when they're both done, the `SortWaypointDistancesJob` job will run, using the results of the two jobs! Neat!
+
 You might notice something in this piece of code though: Both `CalculateDistancesJob` and `CalculateAccessiblityJob` uses the `waypoints` array without any dependencies! They're going to conflict, and it's not going to work! Well, actually not, because they're both only reading from waypoints, and that can perfectly be done in parallel on different threads without problem. It's only when you start modifying data that you run into data races.
 To let the Job System know that you're only going to read from some data, you can put a `[ReadOnly]` marker on the field in the job struct:
 
@@ -264,7 +269,9 @@ struct CalculateDistancesJob : IJob {
 ```
 
 This will let the job scheduler know that you only want to read from the array, and will be able schedule it in parallel with other jobs just reading the same data.
+
 Note that it doesn't prevent you from writing to the array; however doing so will produce a nasty runtime error.
+
 There's also a `[WriteOnly]` marker, for if you are only ever writing to an array, such as having an output array.
 
 ### Avoiding main thread blocking
@@ -377,7 +384,9 @@ We're going to have to refactor the code to satisfy all of these points. You can
 The first thing we can do is to actually specify the job. The method is getting called from a lot of different places in the codebase, so we'd like to keep the method, but replace the implementation with a job. We'll just in the method, instead of calculating everything directly, create the job, fill it with data, run it, get the result out, do cleanup, and then return the result. We're not going to get any multithreading out of this; if we wanted that, we need to do some bigger refactor of the code, possibly to allow all units in the game to run their method at the same time (this is going to be much easier when we get into Entities). Instead, we'll just the benefit of having the method Burst-compiled.
 
 Instead of looping through a lot of Units, we have to replace this with a list of pure data, so we need to think about, how we can prepare all the data we're going to need before running the job. We need two things for each unit; its transform position, and wether or not it's an enemy, which is queried from some global game manager. For the positions, we can prepare a list of positions in a `NativeArray` ahead of time, and pass that in to our job.
+
 For the enemy check, it's going to depend on the implementation of the method. If the method is simple enough (like `unit.isEnemy != otherUnit.isEnemy`), a job-friedly `static` version of it can be exposed, that takes in pure-data input, which can be called from the job (you can call methods from jobs no problem, you just can't pass in the reference to the game handler, since it's a MonoBehaviour). However let's just say that it's a complicated method that requires access to a lot of global state. In this case, we'll have to pre-calculate it for each unit before starting the job. We'll create another `NativeArray`, this time with a bool for each unit, to signal if they're an enemy or not, and we'll fill the array before starting the job.
+
 The last issue is that jobs can't return values. What we can do instead is to return the value via a write-only, one-length array, where we write the result to the first slot. Or, instead of a one-length array, use `NativeReference` to store the resulting value. We'll mark it with `[WriteOnly]`, just to signal it to the Job System, in case it can do some optimizations, and I like to prefix the name with "out", so that it's clear that it's meant to be a return value.
 
 ```c#
@@ -451,6 +460,7 @@ void Update() {
 ```
 
 If you think that this is a lot more code than before, well, yea, it kind of is. Using the Job System can be a bit verbose, and requires a lot of allocation, copying and cleanup. When you see the result of getting code Burst compiled, and see it reduced from multiple milliseconds to almost nothing, it's going to feel worth it. Another side-benefit as opposed to traditional code is that jobs are completely self-contained. There's no way that deep within a method, it suddenly calls out to methods that start messing with things it shouldn't, because that literally not going to compile.
+
 Not all code is well-suited to be jobified. What is traditionally called "glue" code, meaning code that doesn't do much calculation, but just bind different system together, like AI decision-making code, that needs access to a bunch of different systems, is going to be very difficult to jobify, since you'll have to provide all the data it's going to need up-front, and it's not going to have a lot of benefit, since it's probably not what's tanking your framerate. Use it instead for long-running methods, that you can see in the profiler is taking up a big chunk of your frametime. 
 
 ### Parallel job execution
@@ -494,12 +504,202 @@ int[] calculateSums(int[] valuesA, int[] valuesB) {
 ```
 
 The only differences from a regular `IJob` would be that usually you'd just do a for-loop inside of the job, but now the Execute method only contains what would be inside of the loop body. Also when you schedule the job, you have to specify the amount of times it should loop, along with an inner loop batch count. It's going to take the entire array, and split it up into batches, with the size of each batch defined by that count, and run each of them independently. If you schedule a job with a long enough array, you should be able to see it taking up all the job workers threads! If you have a job that's looping over data, turning it into a `IJobParallel` For is a pretty easy way to parallelize it.
+
 You might notice a possible race condition here though: what if you access the array outside of the index given? What happens if you write to sum 10 when invoked as index 1? Well, the Job System is going to prevent you. By default, you can only access array indices the same as the index you get passed in. If you really need access outside of that, and you're sure you know what you're doing, you can put `[NativeDisableParallelForRestriction]` on the array declaration to avoid this error.
 
 ### Job System conclusion
 
-This should be everything you need to know to start using the Job System! By converting long-running calculations into Burst-optimized jobs, you can achieve great speedups. Of course, this requires that you have your calculations fairly separate from your glue-code, that requires access to global state, and if you really want the full potential of job realized, you might have to restructure your code away from the typical MonoBehaviour structure. Like, if you want all units to run their pathfinding code in parallel, either you need to schedule the jobs to have them ready for the next frame, or you need to have a planner object, that calculates the paths for all units at the same time during the frame. When we get to Entities, you'll see that this kind of functionality is exactly what it unlocks. For now, if jobs fulfill your performance needs, feel free to stop here, and just use jobs in a GameObject environment! It can be perfectly fine! But if you need a lot of objects in your game, or if you're just curious, then read on!
+This should be everything you need to know to start using the Job System! By converting long-running calculations into Burst-optimized jobs, you can achieve great speedups. Of course, this requires that you have your calculations fairly separate from your glue-code, that requires access to global state, and if you really want the full potential of job realized, you might have to restructure your code away from the typical MonoBehaviour structure. Like, if you want all units to run their pathfinding code in parallel, either you need to schedule the jobs to have them ready for the next frame, or you need to have a planner object, that calculates the paths for all units at the same time during the frame.
+
+When we get to Entities, you'll see that this kind of functionality is exactly what it unlocks. For now, if jobs fulfill your performance needs, feel free to stop here, and just use jobs in a GameObject environment! It can be perfectly fine! But if you need a lot of objects in your game, or if you're just curious, then read on!
 
 ## Entities
 
+### The current state of ECS in Unity
 
+Unity have from the beginning had an ECS system; the GameObject is the entity, which is a class on which you can add/get/remove components (`AddComponent`/`GetComponent`/etc), components usually being `MonoBehaviour`s, which is a subclass of the `Component` class. The System part is a bit more hidden, but it is for example the Update system, which calls the `Update` method on each component, which allows themselves to update their state.
+
+This system works pretty well because it’s simple, and easy to work with for programmers used to object-oriented programming. It is, on the other hand, also broken enough to barely be able to be called an ECS.
+
+First of all, the entity is usually just an ID, with no other associated state. In Unity’s system, that ID is wrapped in a `GameObject` class, and your ID is a reference to that class. That class contains things like the name of the object and whether it’s activated or deactivated. That state should really be in components, since that’s where the state of the entity is supposed to be. It’s also impossible to create a GameObject without a Transform component, which is kind of weird. 
+
+Second, components are supposed to be pure state. It’s just a collection of data about the entity it’s connected to. But in Unity’s case, the systems got implemented not as separate objects, but as methods on the components, which just blurs the line of what is a component and what is a system.
+
+Last of all, this way of structuring an ECS is just not performant. Every part of the system is a heap-allocated class, which means that it lives in its own place in memory, and if something wants to access another part of the system, it will have to jump to another place in memory, usually jumping through a few places to find it. Instantiating new entities and adding/removing components is very slow, because it requires allocating and instantiating C# objects. Running the Update System requires going through all the component objects and calling a method by name. And of course, since all systems have global access to every GameObject and component currently instantiated (through `Transform.Find`, `FindObjectByType`, singletons, etc) and can access global state via `static`s, there’s no way this could run on a background thread, meaning everything will have to run sequentially on the main thread.
+
+Another way in which it’s not only not performant, but also hard to use, are cases where you want to access a list of components, instead of running a system on one component at a time. Say you want to find the closest enemy unit. What you want to do is to get a list of all units, filter out the non-enemies, and then find the distance to each one of them, and select the smallest. You can `FindObjectsByType<Unit>` and loop through them, but doing so every frame, possibly many times per frame, is going to be horrendously slow, not even speaking of all the memory allocations it’s going to make. And what if you want to find only the units that have health components? There’s no `FindObjectsByType<Unit, Health>`. So what you do instead is that you create a `UnitsManager` object, where units will register themselves, so that you can add them to a list, maybe even a separate list for friendlies and enemies if you know you’re going to be looping through them a lot. And remember to clean out the lists when the objects get destroyed, or you’re going to have `NullReferenceException`s!
+
+Anyway, enough talking about the current state of things. Time to see how it can be done better.
+
+### A new way of doing ECS
+
+Unity’s new ECS system (called Entities) is not a fixup of this old system, but a radical departure from it, and it wants to fix all of the problems listed above. An entity is not a class anymore; it’s just a struct with and ID. It requires no allocations, and come with no state. No `Transform`, no name. Just an ID.
+
+Components are what we described earlier as the ideal component: it’s just a C# struct with data, that you can attach to Entities. No Update method, no `Awake`/`Start`, it’s just a struct. Want a component to keep track of health of an entity? Just make a struct with a float health; and you’re done. Accessing and modifying this health will be done from systems.
+
+A system in Entities is a struct or a class, with one method that gets invoked at a certain time in each frame. You can’t start systems from other systems, you can only schedule them to happen before or after another system. If a system doesn’t access any global state, but instead statically specifies which components it wants to access, it will be able to be run asynchronously in the background. If the system writes new data to components, other systems wanting to read from those components will be scheduled to run after that system has completed. If multiple systems want read-only access to component data, they can be scheduled to be run at the same time on different background threads.
+
+Whereas in the standard Unity system you are desentivized from using a lot of `GetComponent` and `FindObjectsByType`, instead wanting to cache the responses to these, in the Entities ECS, this pattern is actually encouraged. Component data is not scattered around in memory in heap-allocated C# objects; instead they are packed tightly in arrays, making looping over them very efficient and cache-friendly. Say that, as in the previous example, you want to find all objects that have a `Unit` and `Health` component, this is as easy as making an `EntityQuery<Unit, Health>`, and then looping over it (syntax-wise it’s not as simple as that, but we’ll get to it). Doing it this way is as efficient as for-looping over an array, since that it essentially what it’s doing. There are also ways to optimize storage further, by chucking the data based on specific properties.
+
+This more efficient approach changes the way you want to structure your objects. In the traditional system, you want to chunk things together in bigger components, so you avoid having a lot of references, and potential for nullref-exceptions. Like a Health component that tracks health, exposes events for health changing, handles unit death, and possibly also defence, blocking, dodging, hit effects, sounds, etc. In Entities ECS, these big components are very much discouraged. Since splitting things into multiple components has such a low overhead now, we can instead make a Health component, a Physical Defence component, a component for Magical Defence, Dodge, Block, and so on. Then, the system for dealing damage can find the relevant components, and if a component doesn’t exist, use a default value.
+
+It’s even encouraged to have empty components, as a form of boolean data. Take the `GameObject.SetActive`/`GetActive`/`activeSelf`. In Entities ECS, this active/deactive state is moved out from the entity to a component. Entities are considered active by default, disabling it is just adding a Disabled component to it (Along with checking for components on an Entity, adding/removing components is also very efficient). The Disabled component is just an empty struct, since just adding the component communicates everything it needs to. Empty components are called Tag Components.
+
+One last thing that Entities adds is the ability to run multiple separate Entity-worlds at the same time. In the traditional ECS, if you create a GameObject with a Health component, it will always show up in a `FindObjectsByType`, even if it’s in another scene. In Entities ECS, all queries are performed on a World, and you can always just create a new empty World, and add entities, components and systems to that, and it will be completely cut off from all other Worlds.
+
+Alright, enough of the theory, it's time to show how to actually use this thing.
+
+### Creaing your first entity
+
+The first thing you need to get the Entities ECS started, other than installing the Entities package, is a `World` to add your entities into. You can always just create a new `World`, but the easiest way is to use the default `World`, which is accessed statically as `World.DefaultGameObjectInjectionWorld`. From that you can get the `EntityManager` through the `.EntityManager` property. This is what you use to create an entity:
+
+```c#
+using Unity.Entities;
+
+var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
+var entity = entityManager.CreateEntity();
+```
+
+As simple as that, you now have a new, blank entity. If you open the Entities Hierarchy window in Unity (Window > Entities > Hierarchy), you will be able to find it in the bottom with a name like `Entity 0:1`. This is how entities are identified. Entities can be given a name with the `SetName` method, which is a shorthand for adding a name component to it. Remember, the entity itself has no state. It doesn't keep track of its own name or components. The entity is just an ID; what components it has is controlled by the `EntityManager`. That's why all the methods for querying/modifiying entities are on the `EntityManager`, not the entity itself.
+
+```c#
+entityManager.SetName(entity, "My First Entity");
+```
+
+It will now show up in the Entity Hierarchy with that name. If you want to disable it, equvivalent to `gameObject.SetActive(false)`, that's just adding a `Disabled` tag-component to it:
+
+```c#
+entityManager.AddComponent<Disabled>(entity);
+```
+
+It will now show up as disabled in the hierarchy. Enabling it again is just removing the Component:
+
+```c#
+entityManager.RemoveComponent<Disabled>(entity);
+```
+
+### Creating Entity components
+
+Creating a component to associate some state with an entity is just making a struct, that conforms to the ` IComponentData` interface.
+
+```c#
+struct Health : IComponentData {
+    public float current;
+    public float max;
+}
+```
+
+And to attach it to your entity:
+
+```c#
+entityManager.AddComponentData(entity, new Health { current = 100, max = 100 });
+```
+
+Notice that if you want to actually provide some starter-data to the component when you add it, you use `AddComponentData` instead of just `AddComponent`. The same could be accomplished by:
+
+```c#
+entityManager.AddComponent<Health>(entity);
+entityManager.SetComponentData(entity, new Health { current = 100, max = 100 });
+```
+
+`AddComponentData` just checks that a component doesn't already exist, and `SetComponentData` checks that it does already exist.
+
+To get component values from an entity, you use `GetComponentData`, and you can then change the struct, and apply it via `SetComponentData`.
+
+```c#
+var health = entityManager.GetComponentData<Health>(entity);
+health.current = 50;
+entityManager.SetComponentData(entity, health);
+```
+
+And to remove the `Health` component from the entity:
+
+```c#
+entityManager.RemoveComponent<Health>(entity);
+```
+
+`IComponentData` types doesn’t have to be structs, you can also make class components, and you can keep references to other components or game objects in them. However, as we’ll get to see later, if you want to use them in Burst-optimized, background-scheduled, efficient jobs, then a lot more restrictions will apply, like reference types (classes) being completely banned. 
+
+### Finding Entity components
+
+To find components, you can create `EntityQuery`s. Queries can be configued with groups of Components, exclusion of components, read-only/read-write, and more complicated things like filtering based on Shared Components (a later topic), but for now we'll just create a query to find all our `Health`s.
+
+```c#
+var query = entityManager.CreateEntityQuery(typeof(Health));
+```
+
+If you want to loop over all the entities in a query, and perform some logic, you'll have to create a System to do that. If you want to access the Components outside of a System, you'll have to instead put them into an array. Everything in Entities uses `NativeArray`s (if you skipped to the Entities part of the guide, you can read about them in the Native Collection part), so remember to `Dispose()` them when you're done.
+
+```c#
+using Unity.Collections;
+
+var entities = query.ToEntityArray(Allocator.Temp);
+
+foreach (var entity in entities) {
+    var health = entityManager.GetComponentData<Health>(entity);
+    Debug.Log($"Entity {entity} has {health.current} / {health.max} health");
+}
+
+entities.Dispose();
+```
+
+In this case, we ask the `EntityQuery` to create for us a `NativeArray` of all the Entities that matches the query. We then know that all of those entities will have a Health component, and we can get each component via `GetComponentData`.
+
+Another option is to get arrays of the component values:
+
+```c#
+var healths = query.ToComponentDataArray<Health>(Allocator.Temp);
+
+foreach (var health in healths) {
+    Debug.Log($"Entity has {health.current} / {health.max} health");
+}
+
+healths.Dispose();
+
+```
+
+Notice that since `Health` is just a pure-data struct, there's no way to get the Entity from a component.
+
+If we want to create a combined query, like for all entities that both have a `Health` and a `Defence` component, we can add this to our query:
+
+```c#
+var query = entities.CreateEntityQuery(typeof(Health), typeof(Defence));
+```
+
+And then get an array for each component. To get the number of results, we can use `.CalculateEntityCount()`.
+
+```c#
+var count = query.CalculateEntityCount();
+var healths = query.ToComponentDataArray<Health>(Allocator.Temp);
+var defences = query.ToComponentDataArray<Defence>(Allocator.Temp);
+
+for (var i = 0; i < count; i++) {
+    var health = healths[i];
+    var defence = defences[i];
+    
+    Debug.Log($"Entity has {health.current} / {health.max} health and {defence.physical} physical defence");
+}
+
+healths.Dispose();
+defences.Dispose();
+```
+
+Even though this is very possible, for the most part, you won't actually be executing queries manually. Instead, you'll be creating Systems that runs once per frame. The systems will have some handy methods for more easily creating queries.
+
+### Creating Systems
+
+To actually add some logic to this, like `Debug.log`ing the health every frame, we create a System that works on `Health`s. The easiest way to create a System is to make a class that subclasses `SystemBase`.
+
+```c#
+partial class HealthLogger : SystemBase {
+    protected override void OnUpdate() {
+        
+    }
+}
+```
+
+`SystemBase` has two requirements of its subclasses: it must implement the `OnUpdate` method, which is the method that will get called when the System runs, and the class must be a `partial` class (this is just an implementation detail in how the ECS is implemented).
+
+There's no need to register or start the System, it will automatically be detected, and added to the update loop. So just adding this class to your project will start executing `OnUpdate` once each frame.
+
+To actually run some code per component, you can use an `EntityQuery` like before, but instead of using it directly, use it instead to run a Job System job for each entry (Now's the time to check out the Job System section above, if you skipped it).
