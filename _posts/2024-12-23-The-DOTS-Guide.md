@@ -11,11 +11,11 @@ So, a lot of Unity developers have heard of DOTS, or the Data Oriented Tech Stac
 
 The term DOTS cover a few different projects, the primary ones being the Job System, the Burst Compiler and the Entities package. These are only loosely coupled, so you can use any of them that fits your project. Here’s a few quick overview of these:
 
-- The Job System can take pieces of code and turn them into self-contained jobs, which can be scheduled to be run in the background, allowing easy multithreaded code without worrying about things like locks and data races.
-- The Burst Compiler can take pieces of code and, instead of running them on Unity’s Mono .NET runtime, compile it down to speedy native code, and even do some clever optimizations to make code run much faster (it’s not an exaggeration to expect 10-100x speedup!)
-- The Native Collections package gives you collections like arrays, lists and dictionaries, like the ones that ships with C#, but in *unmanaged* versions. This means that they don’t use the garbage collector at all: instead they’re manually allocated and disposed off. They also come with some handy safety checks for use in multithreaded code.
-- The Mathematics package as an alternative to the built in `VectorX` and `Mathf`, which can produce much more optimized math code when Burst-compiled.
-- The Entities package is a new way to do ECS as an alternative to GameObjects and MonoBehaviours. It’s doing away with the object oriented thinking, replacing it with a systems based approach, allowing many times more entities to exist.
+- The **Job System** can take pieces of code and turn them into self-contained jobs, which can be scheduled to be run in the background, allowing easy multithreaded code without worrying about things like locks and data races.
+- The **Burst Compiler** can take pieces of code and, instead of running them on Unity’s Mono .NET runtime, compile it down to speedy native code, and even do some clever optimizations to make code run much faster (it’s not an exaggeration to expect 10-100x speedup!)
+- The **Native Collections** package gives you collections like arrays, lists and dictionaries, like the ones that ships with C#, but in *unmanaged* versions. This means that they don’t use the garbage collector at all: instead they’re manually allocated and disposed off. They also come with some handy safety checks for use in multithreaded code.
+- The **Mathematics** package as an alternative to the built in `VectorX` and `Mathf`, which can produce much more optimized math code when Burst-compiled.
+- Finally, the **Entities** package is a new way to do ECS as an alternative to GameObjects and MonoBehaviours. It’s doing away with the object oriented thinking, replacing it with a systems based approach, allowing many times more entities to exist.
 
 These packages together creates a whole new way of structuring your projects, and unlocks performance that was not feasible before.
 
@@ -604,6 +604,8 @@ entityManager.SetComponentData(entity, new Health { current = 100, max = 100 });
 
 `AddComponentData` just checks that a component doesn't already exist, and `SetComponentData` checks that it does already exist.
 
+After adding a component to an entity, you are able to inspect and change the values in the inspector window by selecting the entity in the Entities Hierarchy, just like you can inspect and modify regular MonoBehaviour components.
+
 To get component values from an entity, you use `GetComponentData`, and you can then change the struct, and apply it via `SetComponentData`.
 
 ```c#
@@ -800,7 +802,7 @@ unitAllegiances.Dispose();
 
 Here we have a unit as an entity with a UnitAllegiance component, to specify if they're friend or foe, and a UnitTargeting component, with a `bool hasTarget`/`Entity target` pair, to hold data about the current target of each unit. The `FindNearestEnemy` job will, for each unit, go through each other unit, find the closest enemy, and assign that as its target. Notice that the `UnitTargeting` component is marked as `ref`, allowing us to write to it. Usually the way to "return" values from entity jobs is to write the result into a component on each entity.
 
-Also to note is the `LocalToWorld` component, which is the entities-equivalent of the `Transform` component. We'll get back to entity transforms later.
+Also to note is the `LocalToWorld` component, which is the entities-equivalent of the `Transform` component. We'll get back to entity transforms later, for now just know that you need to import `Unity.Transforms` to have it available.
 
 Another small thing is that you can use the `ToEntityArray` method on entity query to get an array of all the entities matched by the query. All `ToXArray` methods on the query will always return a list with the length of the number of entities matched by the query, so an index into `unitEntities` will match an index into `unitTransforms` and `unitAllegiances`. 
 
@@ -813,13 +815,179 @@ But when to run this job? This is not something we just want to run once in the 
 The easiest way to create a System is to make a class that subclasses `SystemBase`.
 
 ```c#
-partial class HealthLogger : SystemBase {
+partial class FindTargetsSystem : SystemBase {
     protected override void OnUpdate() {
         
     }
 }
 ```
 
-`SystemBase` has two requirements of its subclasses: it must implement the `OnUpdate` method, which is the method that will get called when the System runs, and the class must be a `partial` class (this is just an implementation detail in how the ECS is implemented).
+`SystemBase` has two requirements of its subclasses: it must implement the `OnUpdate` method, which is the method that will get called when the System runs, and the class must be a `partial` class (this is just an implementation detail in how the systems are implemented).
 
-There's no need to register or start the System, it will automatically be detected, and added to the update loop. So just adding this class to your project will start executing `OnUpdate` once each frame.
+There's no need to register or start the System, it will automatically be detected, and added to the update loop. So just adding this class to your project will start executing `OnUpdate` once each frame. They're not tied to the regular Unity scenes, instead they live in an entity World. By default, systems are added to the `DefaultGameObjectInjectionWorld`, which is also the one we're adding our entities to. At some point, we'll get to creating our own entity worlds, but for now we'll just use the default world. Just know that doing a `LoadScene` or something like that will have no effect on entities or systems, they'll keep existing and running.
+
+### Scheduling jobs
+
+Now that we have an update method that gets invoked every frame, we can start actually doing things, like updating targeting data for our units. By using the `FindNearestEnemyJob` job from before, we can now invoke it in the `OnUpdate` of our system, generating targeting data every frame:
+
+```c#
+partial class FindTargetsSystem : SystemBase {
+    protected override void OnUpdate() {
+        var unitsQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<UnitAllegiance>());
+        var unitEntities = unitsQuery.ToEntityArray(Allocator.TempJob);
+        var unitTransforms = unitsQuery.ToComponentDataArray<LocalToWorld>(Allocator.TempJob);
+        var unitAllegiances = unitsQuery.ToComponentDataArray<UnitAllegiance>(Allocator.TempJob);
+        
+        Dependency = new FindNearestEnemyJob {
+            unitEntities = unitEntities,
+            unitTransforms = unitTransforms,
+            unitAllegiances = unitAllegiances
+        }.ScheduleParallel(Dependency);
+        
+        unitEntities.Dispose(Dependency);
+        unitTransforms.Dispose(Dependency);
+        unitAllegiances.Dispose(Dependency);
+    }
+}
+```
+
+This looks more or less like what we had before, when we just manually invoked the job. There are some differences however; more specifically this `Dependency` property. This is an inherited property from `SystemBase`, and is a `JobHandle`, like what we use to set up job dependencies. Each system has its own dependency handle, which is used to chain jobs together. This is why we don't have to `.Complete()` the `FindNearestEnemyJob`: the job can just keep running after the system is over. If another system is later scheduled that wants to read or write data that is being touched by our job, it'll be able able to use the `Dependency` property to chain them properly together!
+
+In our case, we schedule the `FindNearestEnemyJob`, and add the `Dependency` `JobHandle` has its input dependency. The schedule call will then return a new `JobHandle`, that will be our system's new dependency, so we assign the return value of `ScheduleParallel` back to the system's `Dependency`. This means that other future jobs scheduled against the Dependency will be set up just as if we saved the return value of `ScheduleParallel`, and passed it into the next `Schedule` call we did, just as we did in the job System section on dependencies.
+
+If those details aren't completely clear, don't worry, just know that, in systems, when we schedule jobs, we want to pass in the `Dependency` to `Schedule` calls, and save the return value back to the `Dependency`. If we follow this pattern, we won't have to call `.Complete()` on jobs we schedule, and we won't be blocking the main thread. Nice!
+
+In the end, we also pass the `Dependency` property to the `Dispose` calls on our allocated collections. This is because we can't just dispose them immediately anymore, since we exit our update method before the job might be done running. If we just dispose them right then and there, we might do it while the job is running, and it's not going to be happy having the rug swept out from under its feet like that. So we want do a scheduled dispose; luckily that's as simple as passing the final job handle into the Dispose call. This will schedule a small dispose-job right after our job, that'll just dispose each collection, at a time where it's not in use anymore.
+
+### Systems setup
+
+One minor change we might want to do to the system above is to cache the entity query. Since it's not going to change from frame to frame, it's typical to just create it once when the job starts and reuse it. So let's do that quickly. The system equivalent of the `Start()` method is `OnCreate()`, where we can create an store our query:
+
+```c#
+partial class FindTargetsSystem : SystemBase {
+    EntityQuery unitsQuery;
+    
+    protected override void OnCreate() {
+        unitsQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<UnitAllegiance>());
+    }
+    
+    protected override void OnUpdate() {
+        var unitEntities = unitsQuery.ToEntityArray(Allocator.TempJob);
+        
+        ...
+    }
+}
+```
+
+### A more complex example
+
+Now, the targeting data we calculate is just written to component data by a job, that'll just complete at some point. Well how do we actually use that data to do anything useful? In general, using entities, pretty much every time we want to "do" something, that means writing a System. So let's write a system that actually makes each unit attack its target.
+
+This is actually a bit more tricky than you might imagine. For each unit, it has a `UnitTargeting` component, that contains the Entity that it wants to attack. So we need to loop over each unit, check if it has a target, and if it does, get that entity, get its `Health` component, and subtract some damage. This would be fairly straightforward to do on the main thread; just use `EntityQuery` and `GetComponentData`/`SetComponentData`.
+
+Doing it this way, however, would go a bit aginst the entities way of doing things; entity queries and reading/writing component data can only be done on the main thread (with exceptions, but let's just assume that as a general rule for now). Doing all this on the main thread would not only miss out on running it in non-blocking in parallel, but reading the targeting data just after scheduling the target data calculation in the previous system would have to block the main thread waiting for that job to finish, completely removing the benefit of jobifying it in the first place! (well, not completely, it's still going to be parallelized across multiple cores, but still.)
+
+A more optimal approach would be to do all this from entity jobs. Just remember that jobs need all their data up front; in our targeting data we only have the entity to attack, but not direct access to the health component. We want to schedule the job in parallel, and if two units have the same target, they might want to write to the same `Health` component from different threads. Clearly another approach is needed.
+
+The approach will be to split it up into two operations; first, we'll go through all the attackers, and collect all the damage done to each entity. Then we'll go over all units, passing the collection we've generated along, and subtract health from each based on how many attacks they took.
+
+Since each unit only attacks one other unit, we'll create two `NativeArray`s with an entry each for each unit. One array will contain the entity being damaged, the other a float with the amount of damage done. The first entity will write to the first index in the two arrays, the second to the second index, and so on.
+
+```c#
+struct CollectDamagesJob : IJobEntity {
+    [WriteOnly] NativeArray<Entity> damagedEntity;
+    [WriteOnly] NativeArray<float> damageDone;
+    
+    // TODO what's it called
+    public void Execute([sdfsdfsdfsdf] int entityIndex, in UnitStats stats, in UnitTargeting targeting) {
+        if (targeting.hasTarget) {
+            damagedEntity[entityIndex] = default;
+            damageDone[entityIndex] = 0;
+        } else {
+            damagedEntity[entityIndex] = targeting.target;
+            damageDone[entityIndex] = stats.strength;
+        }
+    }
+}
+
+// In the system:
+var unitsQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<UnitStats>(), ComponentType.ReadOnly<UnitTargeting>());
+var unitsCount = unitsQuery.CalculateEntityCount();
+var damagedEntity = new NativeArray<Entity>(length: unitsCount, Allocator.TempJob);
+var damageDone = new NativeArray<float>(length: unitsCount, Allocator.TempJob);
+
+Dependency = new CollectDamagesJob {
+    damagedEntity = damagedEntity,
+    damageDone = damageDone
+}.ScheduleParallel(unitsQuery, Dependency);
+```
+
+We use the `[sdfsdfs]` attribute on the entityIndex parameter to get the index of the current entity being processed. The amount of damage done is read from a `UnitStats` component that we use to hold things like strength of each unit.
+
+Then we create an entity query to calcualte how long our arrays should be. The `CalculateEntityCount` is not going to block, even if a job is writing to some of the components, since jobs can only change values, not add or remove entities/components. Then we also pass in the query to the ScheduleParallel, since then it avoids auto-creating the same query again, and it will also check that the query used for the list and the job will actually match up.
+
+Now that we have an array of entities getting hurt, and a corresponding array of how badly they're getting hurt, we can create a job that for each unit subtracts health based on those arrays:
+
+```c#
+struct ApplyDamagesJob : IJobEntity {
+    [ReadOnly] NativeArray<Entity> damagedEntity;
+    [ReadOnly] NativeArray<float> damageDone;
+    
+    public void Execute(in Entity entity, ref UnitHealth health) {
+        for (var i = 0; i < damagedEntity.Length; i++) {
+            if (damagedEntity != entity) { continue; }
+            
+            health.current = Mathf.Max(0, health.current - damageDone[i]);
+        }
+    }
+}
+```
+
+There are probably more efficient ways of doing this than having each unit loop through the entire list, but we'll keep it as simple as possible for now.
+
+Put together, our attack system looks like this:
+
+```c#
+partial struct AttackTargetSystem : SystemBase {
+    EntityQuery unitsQuery;
+    
+    protected override void OnCreate() {
+        unitsQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<UnitStats>(), ComponentType.ReadOnly<UnitTargeting>());
+    }
+    
+    protected override void OnUpdate() {
+        var unitsCount = unitsQuery.CalculateEntityCount();
+        var damagedEntity = new NativeArray<Entity>(length: unitsCount, Allocator.TempJob);
+        var damageDone = new NativeArray<float>(length: unitsCount, Allocator.TempJob);
+        
+        Dependency = new CollectDamagesJob {
+            damagedEntity = damagedEntity,
+            damageDone = damageDone
+        }.ScheduleParallel(unitsQuery, Dependency);
+        
+        Dependency = new ApplyDamagesJob {
+            damagedEntity = damagedEntity,
+            damageDone = damageDone
+        }.ScheduleParallel(Dependency);
+        
+        damagedEntity.Dispose(Dependency);
+        damageDone.Dispose(Dependency);
+    }
+    
+    [BurstCompile]
+    struct CollectDamagesJob : IJobEntity {
+        // Same as above
+    }
+    
+    [BurstCompile]
+    struct ApplyDamagesJob : IJobEntity {
+        // Same as above
+    }
+}
+```
+
+And there we have it, our targeting data is now converted into units losing health, all without blocking the main thread. Neat!
+
+Of course this is kind of a lot of work, and getting it to run in parallel requires doing some things in multiple steps, and allocating a bit more data than if you'd just have done it on the main thread. And maybe the main thread version would be plenty fast! It all depends on your use case; if you expect to have at most 20 units, this is in no way going to be worth the effort. If you're planning to have thousands, parallelizing like this is essential. As always, remember to profile your code, to find out if you actually need to do this work!
+
+### Chainging systems
