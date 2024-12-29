@@ -144,7 +144,11 @@ struct SumJob : IJob {
     }
 }
 
-var job = new SumJob { valueA = 10, valueB = 20 };
+var job = new SumJob {
+    valueA = 10,
+    valueB = 20
+};
+
 job.Run();
 Debug.Log($"Sum: {job.outSum}"); // Prints: `Sum: 0`
 ```
@@ -164,7 +168,11 @@ struct SumJob : IJob {
     }
 }
 
-var job = new SumJob { valueA = 10, valueB = 20, outSum = new NativeReference<int>(Allocator.TempJob) };
+var job = new SumJob { 
+    valueA = 10,
+    valueB = 20,
+    outSum = new NativeReference<int>(Allocator.TempJob)
+};
 
 job.Run();
 Debug.Log($"Sum: {job.outSum.Value}"); // Prints: `Sum: 30`
@@ -324,6 +332,8 @@ public class PathfindingUnit : MonoBehaviour {
     
     void Update() {
         if (pathfindingJobHandle != default && pathfindingJobHandle.IsComplete) {
+            // Take a section of the array and turn it into a NativeSlice
+            // Then use ToArray to use the NativeSlice as a NativeArray
             path = pathfindingJob.pathBuffer.Slice(0, pathfindingJob.pathLength.Value).ToArray();
             beingPath(path);
             
@@ -486,15 +496,14 @@ struct CalculatePairSumsJob : IJobParallelFor {
 int[] calculateSums(int[] valuesA, int[] valuesB) {
     Debug.Assert(valuesA.Length == valuesB.Length);
     
-    var job = new CalculatePairSumsJob();
+    var job = new CalculatePairSumsJob {
+        valuesA = new NativeArray<int>(length: valuesA.Length, Allocator.TempJob),
+        valuesB = new NativeArray<int>(length: valuesB.Length, Allocator.TempJob),
+        sums = new NativeArray<int>(length: valuesA.Length, Allocator.TempJob)
+    }
     
-    CalculatePairSumsJob.valuesA = new NativeArray<int>(length: valuesA.Length, Allocator.TempJob);
     CalculatePairSumsJob.valuesA.CopyFrom(valuesA);
-    
-    CalculatePairSumsJob.valuesB = new NativeArray<int>(length: valuesB.Length, Allocator.TempJob);
     CalculatePairSumsJob.valuesB.CopyFrom(valuesB);
-    
-    CalculatePairSumsJob.sums = new NativeArray<int>(length: valuesA.Length, Allocator.TempJob);
     
     job.Schedule(valuesA.Length, innerLoopBatchCount: 32).Complete();
     
@@ -597,14 +606,20 @@ struct Health : IComponentData {
 And to attach it to your entity:
 
 ```c#
-entityManager.AddComponentData(entity, new Health { current = 100, max = 100 });
+entityManager.AddComponentData(entity, new Health {
+    current = 100,
+    max = 100
+});
 ```
 
 Notice that if you want to actually provide some starter-data to the component when you add it, you use `AddComponentData` instead of just `AddComponent`. The same could be accomplished by:
 
 ```c#
 entityManager.AddComponent<Health>(entity);
-entityManager.SetComponentData(entity, new Health { current = 100, max = 100 });
+entityManager.SetComponentData(entity, new Health {
+    current = 100,
+    max = 100
+});
 ```
 
 `AddComponentData` just checks that a component doesn't already exist, and `SetComponentData` checks that it does already exist.
@@ -891,7 +906,10 @@ partial class FindTargetsSystem : SystemBase {
     EntityQuery unitsQuery;
     
     protected override void OnCreate() {
-        unitsQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<UnitAllegiance>());
+        unitsQuery = EntityManager.CreateEntityQuery(
+            ComponentType.ReadOnly<LocalToWorld>(),
+            ComponentType.ReadOnly<UnitAllegiance>()
+        );
     }
     
     protected override void OnUpdate() {
@@ -934,7 +952,10 @@ struct CollectDamagesJob : IJobEntity {
 }
 
 // In the system:
-var unitsQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<UnitStats>(), ComponentType.ReadOnly<UnitTargeting>());
+var unitsQuery = EntityManager.CreateEntityQuery(
+    ComponentType.ReadOnly<UnitStats>(),
+    ComponentType.ReadOnly<UnitTargeting>()
+);
 var unitsCount = unitsQuery.CalculateEntityCount();
 var damagedEntity = new NativeArray<Entity>(length: unitsCount, Allocator.TempJob);
 var damageDone = new NativeArray<float>(length: unitsCount, Allocator.TempJob);
@@ -975,7 +996,10 @@ partial struct AttackTargetSystem : SystemBase {
     EntityQuery unitsQuery;
     
     protected override void OnCreate() {
-        unitsQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<UnitStats>(), ComponentType.ReadOnly<UnitTargeting>());
+        unitsQuery = EntityManager.CreateEntityQuery(
+            ComponentType.ReadOnly<UnitStats>(),
+            ComponentType.ReadOnly<UnitTargeting>()
+        );
     }
     
     protected override void OnUpdate() {
