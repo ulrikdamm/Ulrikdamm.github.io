@@ -864,6 +864,24 @@ If those details aren't completely clear, don't worry, just know that, in system
 
 In the end, we also pass the `Dependency` property to the `Dispose` calls on our allocated collections. This is because we can't just dispose them immediately anymore, since we exit our update method before the job might be done running. If we just dispose them right then and there, we might do it while the job is running, and it's not going to be happy having the rug swept out from under its feet like that. So we want do a scheduled dispose; luckily that's as simple as passing the final job handle into the Dispose call. This will schedule a small dispose-job right after our job, that'll just dispose each collection, at a time where it's not in use anymore.
 
+### Entities.ForEach
+
+"But wait!" I might hear you say. You've seen the DOTS presentation slides and some examples, and they always include something that looks something like this instead:
+
+```c#
+    Entities
+        .WithReadOnly(unitEntities)
+        .WithReadOnly(unitAllegiances)
+        .ForEach((in LocalToWorld transform, in UnitAllegiance allegiance, ref UnitTargeting targeting) => {
+            ...
+        })
+        .Schedule();
+```
+
+And yes, this is something you can do! It's basically a shorthand syntax for creating an `IJobEntity` inline in your system `OnUpdate` method! It's very handy, but it's also going to be *deprecated soon*. The official advise is to use `IJobEntity` instead, reasons being that the Entities.ForEach code is harder to reuse, and that it's... kind of built on a lot of compiler hacks, and is probably difficult to maintain. I'm including it here, because if you look at entities code, you're probably going to run into it, but I'm not going to be explaining all the details behind it.
+
+The only important detail you should know is that in this example above, the `Dependency` property is updated automatically, meaning you don't have to do the `Dependency = Entities.ForEach(...).Schedule(Dependency)` dance (you can, it's just going to give the same result in the end). If you want multiple `ForEach`es running in parallel, you'll have to juggle the `Dependency` yourself.
+
 ### Systems setup
 
 One minor change we might want to do to the system above is to cache the entity query. Since it's not going to change from frame to frame, it's typical to just create it once when the job starts and reuse it. So let's do that quickly. The system equivalent of the `Start()` method is `OnCreate()`, where we can create an store our query:
