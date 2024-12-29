@@ -562,7 +562,7 @@ This more efficient approach changes the way you want to structure your objects.
 
 It’s even encouraged to have empty components, as a form of boolean data. Take the `GameObject.SetActive`/`GetActive`/`activeSelf`. In Entities ECS, this active/deactive state is moved out from the entity to a component. Entities are considered active by default, disabling it is just adding a Disabled component to it (Along with checking for components on an Entity, adding/removing components is also very efficient). The Disabled component is just an empty struct, since just adding the component communicates everything it needs to. Empty components are called Tag Components.
 
-One last thing that Entities adds is the ability to run multiple separate Entity-worlds at the same time. In the traditional ECS, if you create a GameObject with a Health component, it will always show up in a `FindObjectsByType`, even if it’s in another scene. In Entities ECS, all queries are performed on a World, and you can always just create a new empty World, and add entities, components and systems to that, and it will be completely cut off from all other Worlds.
+One last thing that Entities adds is the ability to run multiple separate Entity-worlds at the same time. In the traditional ECS, if you create a `GameObject` with a `Health` component, it will always show up in a `FindObjectsByType`, even if it’s in another scene. In Entities ECS, all queries are performed on a `World`, and you can always just create a new empty `World`, and add entities, components and systems to that, and it will be completely cut off from all other `World`s.
 
 Alright, enough of the theory, it's time to show how to actually use this thing.
 
@@ -712,7 +712,10 @@ defences.Dispose();
 One good thing to know about entity queries is that `ToComponentDataArray` might be a blocking operation. As we'll see later, we'll be able to run asyncronous jobs on entity component data. If you run `ToComponentDataArray` on an entity query while there's a background job modifying values of components we're trying to query, this method will block, and wait for that job to finish, before it can safely read the component data, and return the array. Actually, as we've created them now, even a background job just reading the component data will block the `ToComponentDataArray`; this is because it's assumed by default that we want read/write access to the data in the query. That's why, if we just query the data to read it, it's good to specify that we want just read-only access to the components. This is done with this syntax:
 
 ```c#
-var query = entities.CreateEntityQuery(ComponentType.ReadOnly<Health>(), ComponentType.ReadOnly<Defence>());
+var query = entities.CreateEntityQuery(
+    ComponentType.ReadOnly<Health>(),
+    ComponentType.ReadOnly<Defence>()
+);
 ```
 
 Even though it's very possible to execute queries like this, for the most part, you won't actually be executing queries manually. Instead, you'll be creating jobs that'll run for each entity in a query. Let's see how!
@@ -830,7 +833,7 @@ unitTransforms.Dispose();
 unitAllegiances.Dispose();
 ```
 
-Here we have a unit as an entity with a UnitAllegiance component, to specify if they're friend or foe, and a UnitTargeting component, with a `bool hasTarget`/`Entity target` pair, to hold data about the current target of each unit. The `FindNearestEnemy` job will, for each unit, go through each other unit, find the closest enemy, and assign that as its target. Notice that the `UnitTargeting` component is marked as `ref`, allowing us to write to it. Usually the way to "return" values from entity jobs is to write the result into a component on each entity.
+Here we have a unit as an entity with a `UnitAllegiance` component, to specify if they're friend or foe, and a `UnitTargeting` component, with a `bool hasTarget`/`Entity target` pair, to hold data about the current target of each unit. The `FindNearestEnemy` job will, for each unit, go through each other unit, find the closest enemy, and assign that as its target. Notice that the `UnitTargeting` component is marked as `ref`, allowing us to write to it. Usually the way to "return" values from entity jobs is to write the result into a component on each entity.
 
 Also to note is the `LocalToWorld` component, which is the entities-equivalent of the `Transform` component. We'll get back to entity transforms later, for now just know that you need to import `Unity.Transforms` to have it available.
 
