@@ -254,13 +254,13 @@ This way, they will execute in the correct order, and you won't get any errors a
 One thing you might also want to do is schedule a job with multiple dependencies. Say you want to both calculate the distance, but also wether the waypoint is accessible or not, and have the sort job only consider accessible waypoints. You can only pass one `JobHandle` to the `Schedule` method, so how would we do this? `JobHandle` has the static method called `CombineDependencies`, which can take in two or more dependencies, and combine them into a single `JobHandle`. This can then be used to schedule the sort job:
 
 ```c#
-var calculateDistancesJob = new CalculateDistancesJob(origin, waypoints, waypointDistances);
-var calculateDistancesJobHandle = calculateDistancesJob.Schedule();
+var distancesJob = new CalculateDistancesJob(origin, waypoints, waypointDistances);
+var distancesJobHandle = distancesJob.Schedule();
 
-var calculateAccessiblityJob = new CalculateAccessiblityJob(origin, waypoints, waypointsAccessibility);
-var calculateAccessiblityJobHandle = calculateAccessiblityJob.Schedule();
+var accessiblityJob = new CalculateAccessiblityJob(origin, waypoints, waypointsAccessibility);
+var accessiblityJobHandle = accessiblityJob.Schedule();
 
-var combinedDependency = JobHandle.CombineDependencies(calculateDistancesJobHandle, calculateAccessiblityJobHandle);
+var combinedDependency = JobHandle.CombineDependencies(distancesJobHandle, accessiblityJobHandle);
 
 var sortJob = new SortWaypointDistancesJob(waypointDistances, waypointsAccessibility);
 var sortJobHandle = sortJob.Schedule(dependsOn: combinedDependency);
@@ -334,7 +334,10 @@ public class PathfindingUnit : MonoBehaviour {
         if (pathfindingJobHandle != default && pathfindingJobHandle.IsComplete) {
             // Take a section of the array and turn it into a NativeSlice
             // Then use ToArray to use the NativeSlice as a NativeArray
-            path = pathfindingJob.pathBuffer.Slice(0, pathfindingJob.pathLength.Value).ToArray();
+            path = pathfindingJob.pathBuffer
+                .Slice(0, pathfindingJob.pathLength.Value)
+                .ToArray();
+            
             beingPath(path);
             
             pathfindingJob.pathLength.Dispose();
@@ -699,7 +702,7 @@ for (var i = 0; i < count; i++) {
     var health = healths[i];
     var defence = defences[i];
     
-    Debug.Log($"Entity has {health.current} / {health.max} health and {defence.physical} physical defence");
+    Debug.Log($"Entity has {health.current}/{health.max} health and {defence.physical} physical defence");
 }
 
 healths.Dispose();
@@ -767,7 +770,11 @@ struct HealOverTimeJob : IJobEntity {
     public float deltaTime;
     
     public void Execute(ref Health health, in HealthRegen regen) {
-        health.current = Mathf.Clamp(health.current + regen.healthPerSecond * deltaTime, min: 0, max: health.max);
+        health.current = Mathf.Clamp(
+            health.current + regen.healthPerSecond * deltaTime,
+            min: 0,
+            max: health.max
+        );
     }
 }
 ```
@@ -804,7 +811,10 @@ struct FindNearestEnemyJob : IJobEntity {
     }
 }
 
-var unitsQuery = entities.CreateEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<UnitAllegiance>());
+var unitsQuery = entities.CreateEntityQuery(
+    ComponentType.ReadOnly<LocalToWorld>(),
+    ComponentType.ReadOnly<UnitAllegiance>()
+);
 var unitEntities = unitsQuery.ToEntityArray(Allocator.TempJob);
 var unitTransforms = unitsQuery.ToComponentDataArray<LocalToWorld>(Allocator.TempJob);
 var unitAllegiances = unitsQuery.ToComponentDataArray<UnitAllegiance>(Allocator.TempJob);
@@ -853,7 +863,10 @@ Now that we have an update method that gets invoked every frame, we can start ac
 ```c#
 partial class FindTargetsSystem : SystemBase {
     protected override void OnUpdate() {
-        var unitsQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<LocalToWorld>(), ComponentType.ReadOnly<UnitAllegiance>());
+        var unitsQuery = EntityManager.CreateEntityQuery(
+            ComponentType.ReadOnly<LocalToWorld>(),
+            ComponentType.ReadOnly<UnitAllegiance>()
+        );
         var unitEntities = unitsQuery.ToEntityArray(Allocator.TempJob);
         var unitTransforms = unitsQuery.ToComponentDataArray<LocalToWorld>(Allocator.TempJob);
         var unitAllegiances = unitsQuery.ToComponentDataArray<UnitAllegiance>(Allocator.TempJob);
@@ -939,7 +952,6 @@ struct CollectDamagesJob : IJobEntity {
     [WriteOnly] NativeArray<Entity> damagedEntity;
     [WriteOnly] NativeArray<float> damageDone;
     
-    // TODO what's it called
     public void Execute([EntityIndexInQuery] int entityIndex, in UnitStats stats, in UnitTargeting targeting) {
         if (targeting.hasTarget) {
             damagedEntity[entityIndex] = default;
