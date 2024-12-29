@@ -5,6 +5,8 @@ permalink: /unity-dots-guide
 exclude: true
 ---
 
+*Work in progress article*
+
 So, a lot of Unity developers have heard of DOTS, or the Data Oriented Tech Stack, but few have actually taken the plunge and started learning it. And that’s not really surprising, since it’s actually not too easy to get started with. There’s a lot of different parts to it, and none of them are particularly straightforward or intuitive. Documentation is pretty spread out, and focuses a lot of performance, rather than “what do I do with this thing?” Well, this is the guide to get started with DOTS, written from a practical point of view to actually get started using it in your existing Unity projects. 
 
 ## What is DOTS
@@ -47,6 +49,9 @@ Another thing to note is the `Allocator.Temp` that's passed in with the construc
 `Allocator.Persistent` is for long-lived allocations
 
 Another thing to note is that all these are structs, not classes, which means you can't null-check them, to see if they have been created. Instead you use the `.IsCreated` property.
+
+And one last important detail: native containers can't be nested! `NativeArray<NativeArray<int>>` is *not allowed*. And no tricks with hiding the inner container in a struct either. The main reason for this is tracking the use of the container only works for containers known at compile-time; the compiler doesn't know how many inner arrays are in your parent array. Some workarounds to this are using a `NativeHashMap<int2, Value>`, flattening your data to fit in a one-dimensional array, writing your own collection type, or using unsafe collections for the inner collections.
+
 
 That's more or less everything you need to know about Native Collections. There are many more details, and you can also create your own custom native collections using scary unsafe pointers, but we'll leave that for now.
 
@@ -881,7 +886,7 @@ partial class FindTargetsSystem : SystemBase {
 
 ### A more complex example
 
-Now, the targeting data we calculate is just written to component data by a job, that'll just complete at some point. Well how do we actually use that data to do anything useful? In general, using entities, pretty much every time we want to "do" something, that means writing a System. So let's write a system that actually makes each unit attack its target.
+Now, the targeting data we calculate is just written to component data by a job, that'll just complete at some point. Well how do we actually use that data to do anything useful? In general, using entities, pretty much every time we want to *do* something, that means writing a System. So let's write a system that actually makes each unit attack its target.
 
 This is actually a bit more tricky than you might imagine. For each unit, it has a `UnitTargeting` component, that contains the Entity that it wants to attack. So we need to loop over each unit, check if it has a target, and if it does, get that entity, get its `Health` component, and subtract some damage. This would be fairly straightforward to do on the main thread; just use `EntityQuery` and `GetComponentData`/`SetComponentData`.
 
@@ -899,7 +904,7 @@ struct CollectDamagesJob : IJobEntity {
     [WriteOnly] NativeArray<float> damageDone;
     
     // TODO what's it called
-    public void Execute([sdfsdfsdfsdf] int entityIndex, in UnitStats stats, in UnitTargeting targeting) {
+    public void Execute([EntityIndexInQuery] int entityIndex, in UnitStats stats, in UnitTargeting targeting) {
         if (targeting.hasTarget) {
             damagedEntity[entityIndex] = default;
             damageDone[entityIndex] = 0;
@@ -922,7 +927,7 @@ Dependency = new CollectDamagesJob {
 }.ScheduleParallel(unitsQuery, Dependency);
 ```
 
-We use the `[sdfsdfs]` attribute on the entityIndex parameter to get the index of the current entity being processed. The amount of damage done is read from a `UnitStats` component that we use to hold things like strength of each unit.
+We use the `[EntityIndexInQuery]` attribute on the entityIndex parameter to get the index of the current entity being processed. The amount of damage done is read from a `UnitStats` component that we use to hold things like strength of each unit.
 
 Then we create an entity query to calcualte how long our arrays should be. The `CalculateEntityCount` is not going to block, even if a job is writing to some of the components, since jobs can only change values, not add or remove entities/components. Then we also pass in the query to the ScheduleParallel, since then it avoids auto-creating the same query again, and it will also check that the query used for the list and the job will actually match up.
 
@@ -990,4 +995,8 @@ And there we have it, our targeting data is now converted into units losing heal
 
 Of course this is kind of a lot of work, and getting it to run in parallel requires doing some things in multiple steps, and allocating a bit more data than if you'd just have done it on the main thread. And maybe the main thread version would be plenty fast! It all depends on your use case; if you expect to have at most 20 units, this is in no way going to be worth the effort. If you're planning to have thousands, parallelizing like this is essential. As always, remember to profile your code, to find out if you actually need to do this work!
 
+If you want some homework, try to extend this to only attack enemies within a certain range. You could create a range parameter in the `UnitStats` component. You could also try to add area damage, so that some units would attack all targets within some radius, instead of just one target. 
+
 ### Chainging systems
+
+*You've reached the end for now. I'm still working on this. Please let me know what you think!*
