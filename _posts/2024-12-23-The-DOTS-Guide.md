@@ -1054,8 +1054,38 @@ Of course this is kind of a lot of work, and getting it to run in parallel requi
 
 If you want some homework, try to extend this to only attack enemies within a certain range. You could create a range parameter in the `UnitStats` component. You could also try to add area damage, so that some units would attack all targets within some radius, instead of just one target. 
 
-### Chaining systems
+### Running systems in order
 
-Now that we have both our 
+Now that we have both our systems, there's an important detail missing; we want to make sure that the `FindTargetsSystem` runs before the `AttackTargetSystem`. Thankfully, there's a pretty easy way to do this, by just adding `[UpdateBefore]` and/or `[UpdateAfter]` tags:
+
+```c#
+[UpdateBefore(typeof(AttackTargetSystem))]
+partial class FindTargetsSystem : SystemBase { ...
+
+[UpdateAfter(typeof(FindTargetsSystem))]
+partial class AttackTargetSystem : SystemBase { ...
+```
+
+it doesn't really matter which one you add, just one of these is going to make sure that they get scheduled in the correct order.
+
+Another thing you can do is add systems to a system group. This is just a way of grouping specific systems together, and making them all run at a certain point. Some built-in groups include, amongst others, the `InitializationSystemGroup`, which runs very early in each frame, `TransformsSystemGroup`, which runs all transform-related systems, and `SimulationSystemGroup` to run after the MonoBehaviour `Update` calls. To add a system to a system group, add the `UpdateInGroup` attribute:
+
+```c#
+[UpdateInGroup(typeof(SimulationSystemGroup))]
+partial class FindTargetsSystem : SystemBase { ...
+```
+
+You can also create custom system groups by just creating an empty class, inheriting from `ComponentSystemGroup`. System groups supports the same `UpdateBefore`/`UpdateAfter`/`UpdateInGroup` as normal systems. `UpdateBefore` and `UpdateAfter` can also be used to update before or after a certain system group, and you can add multiple constraints to each system.
+
+```c#
+[UpdateBefore(typeof(SimulationSystemGroup))]
+public partial class UnitsSystemGroup : ComponentSystemGroup  {}
+
+[UpdateInGroup(typeof(UnitsSystemGroup))]
+[UpdateBefore(typeof(AttackTargetSystem))]
+partial class FindTargetsSystem : SystemBase { ...
+```
+
+If you want to see this laid out visually, you can open the Systems window (Window > Entities > Systems), and see all systems running, grouped and in order.
 
 *You've reached the end for now. I'm still working on this. Please let me know what you think!*
