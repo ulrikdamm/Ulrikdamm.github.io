@@ -231,11 +231,11 @@ struct SumJob : IJob {
 
 That's all you need to do. When you run it now, it should appear in the profiler in a green color instead of the normal blue color, that is, if you can even find it. Burst-compiling jobs can make them so fast that they basically complete in no time, and turn into a tiny sliver of a bar in the profiler.
 
-That's pretty much all there is to it. The only rinkle is that Burst-compiled jobs are harder to debug than non-Bursted jobs. Exception support is limited, stack traces are harder to read, string formatting is more limited, etc. So when you want to debug a job, it makes sense to temporarily turn off Burst. Burst can be turned off completely from the Jobs menu (Jobs > Enable Burst Compilation).
+That's pretty much all there is to it. The only wrinkle is that Burst-compiled jobs are harder to debug than non-Bursted jobs. Exception support is limited, stack traces are harder to read, string formatting is more limited, etc. So when you want to debug a job, it makes sense to temporarily turn off Burst. Burst can be turned off completely from the Jobs menu (Jobs > Enable Burst Compilation).
 
 ### Job scheduling & dependencies
 
-You might have two jobs that somehow share data, like a job converting a list of data, and then another job sorting it. Running those two jobs in the background at the same time will create a conflict, where they both try to access the same data at the same time, which is not allowed, and the Job System will produce an error for you. Of course you can just run them sequencially on the main thread, but the whole point of creating jobs is to be able to run them off the main thread. You could schedule the first job, wait for it to complete, and then schedule the second job, but this will create a "sync point" in the middle, which will block the main thread anyway. You really want to schedule as much work as possible up front, to run everything without any sync points. To do that, we can schedule jobs with dependencies on other jobs. When a job is `.Schedule`d, you get a `JobHandle` back. This handle can be passed in when scheduling another job to create a dependency on the first job. This will make the second job run automatically when the first job is done.
+You might have two jobs that somehow share data, like a job converting a list of data, and then another job sorting it. Running those two jobs in the background at the same time will create a conflict, where they both try to access the same data at the same time, which is not allowed, and the Job System will produce an error for you. Of course you can just run them sequentially on the main thread, but the whole point of creating jobs is to be able to run them off the main thread. You could schedule the first job, wait for it to complete, and then schedule the second job, but this will create a "sync point" in the middle, which will block the main thread anyway. You really want to schedule as much work as possible up front, to run everything without any sync points. To do that, we can schedule jobs with dependencies on other jobs. When a job is `.Schedule`d, you get a `JobHandle` back. This handle can be passed in when scheduling another job to create a dependency on the first job. This will make the second job run automatically when the first job is done.
 
 Say you want to calculate a list of distances to all nearby waypoints, sorted by that distance. You have a `CalculateDistancesJob` job, which calculate the distance to each waypoint, and a `SortWaypointDistancesJob`, which sorts a list of `WaypointDistance`s. You can schedule these two jobs with a dependency, to make them run in the correct order:
 
@@ -289,7 +289,7 @@ There's also a `[WriteOnly]` marker, for if you are only ever writing to an arra
 
 ### Avoiding main thread blocking
 
-Even though the wayponints code before runs in the background, we still end up waiting for the results on the main thread by calling `.Complete()` on the job handle. This might make sense, if you just have a method you need to run, and you need the results immediately before you can do the next thing. In other cases, it might be a bit of a waste having the main thread sitting around idle, while a background job is running. Sometimes you might be able to do some other useful work on the main thread in the meantime, like if you need to do somework, then calculate something, then do something with that calculation, you can jobify the calcuation and schedule it in the beginning, do the initial work while the job is running, and then complete the job to get the result for the final action. That could look something like this:
+Even though the waypoints code before runs in the background, we still end up waiting for the results on the main thread by calling `.Complete()` on the job handle. This might make sense, if you just have a method you need to run, and you need the results immediately before you can do the next thing. In other cases, it might be a bit of a waste having the main thread sitting around idle, while a background job is running. Sometimes you might be able to do some other useful work on the main thread in the meantime, like if you need to do some work, then calculate something, then do something with that calculation, you can jobify the calculation and schedule it in the beginning, do the initial work while the job is running, and then complete the job to get the result for the final action. That could look something like this:
 
 ```c#
 void Update() {
@@ -556,7 +556,7 @@ Components are what we described earlier as the ideal component: it’s just a C
 
 A system in Entities is a struct or a class, with one method that gets invoked at a certain time in each frame. You can’t start systems from other systems, you can only schedule them to happen before or after another system. If a system doesn’t access any global state, but instead statically specifies which components it wants to access, it will be able to be run asynchronously in the background. If the system writes new data to components, other systems wanting to read from those components will be scheduled to run after that system has completed. If multiple systems want read-only access to component data, they can be scheduled to be run at the same time on different background threads.
 
-Whereas in the standard Unity system you are desentivized from using a lot of `GetComponent` and `FindObjectsByType`, instead wanting to cache the responses to these, in the Entities ECS, this pattern is actually encouraged. Component data is not scattered around in memory in heap-allocated C# objects; instead they are packed tightly in arrays, making looping over them very efficient and cache-friendly. Say that, as in the previous example, you want to find all objects that have a `Unit` and `Health` component, this is as easy as making an `EntityQuery<Unit, Health>`, and then looping over it (syntax-wise it’s not as simple as that, but we’ll get to it). Doing it this way is as efficient as for-looping over an array, since that it essentially what it’s doing. There are also ways to optimize storage further, by chucking the data based on specific properties.
+Whereas in the standard Unity system you are desensitized from using a lot of `GetComponent` and `FindObjectsByType`, instead wanting to cache the responses to these, in the Entities ECS, this pattern is actually encouraged. Component data is not scattered around in memory in heap-allocated C# objects; instead they are packed tightly in arrays, making looping over them very efficient and cache-friendly. Say that, as in the previous example, you want to find all objects that have a `Unit` and `Health` component, this is as easy as making an `EntityQuery<Unit, Health>`, and then looping over it (syntax-wise it’s not as simple as that, but we’ll get to it). Doing it this way is as efficient as for-looping over an array, since that it essentially what it’s doing. There are also ways to optimize storage further, by chucking the data based on specific properties.
 
 This more efficient approach changes the way you want to structure your objects. In the traditional system, you want to chunk things together in bigger components, so you avoid having a lot of references, and potential for nullref-exceptions. Like a Health component that tracks health, exposes events for health changing, handles unit death, and possibly also defence, blocking, dodging, hit effects, sounds, etc. In Entities ECS, these big components are very much discouraged. Since splitting things into multiple components has such a low overhead now, we can instead make a Health component, a Physical Defence component, a component for Magical Defence, Dodge, Block, and so on. Then, the system for dealing damage can find the relevant components, and if a component doesn’t exist, use a default value.
 
@@ -566,7 +566,7 @@ One last thing that Entities adds is the ability to run multiple separate Entity
 
 Alright, enough of the theory, it's time to show how to actually use this thing.
 
-### Creaing your first entity
+### Creating your first entity
 
 The first thing you need to get the Entities ECS started, other than installing the Entities package, is a `World` to add your entities into. You can always just create a new `World`, but the easiest way is to use the default `World`, which is accessed statically as `World.DefaultGameObjectInjectionWorld`. From that you can get the `EntityManager` through the `.EntityManager` property. This is what you use to create an entity:
 
@@ -577,13 +577,13 @@ var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
 var entity = entityManager.CreateEntity();
 ```
 
-As simple as that, you now have a new, blank entity. If you open the Entities Hierarchy window in Unity (Window > Entities > Hierarchy), you will be able to find it in the bottom with a name like `Entity 0:1`. This is how entities are identified. Entities can be given a name with the `SetName` method, which is a shorthand for adding a name component to it. Remember, the entity itself has no state. It doesn't keep track of its own name or components. The entity is just an ID; what components it has is controlled by the `EntityManager`. That's why all the methods for querying/modifiying entities are on the `EntityManager`, not the entity itself.
+As simple as that, you now have a new, blank entity. If you open the Entities Hierarchy window in Unity (Window > Entities > Hierarchy), you will be able to find it in the bottom with a name like `Entity 0:1`. This is how entities are identified. Entities can be given a name with the `SetName` method, which is a shorthand for adding a name component to it. Remember, the entity itself has no state. It doesn't keep track of its own name or components. The entity is just an ID; what components it has is controlled by the `EntityManager`. That's why all the methods for querying/modifying entities are on the `EntityManager`, not the entity itself.
 
 ```c#
 entityManager.SetName(entity, "My First Entity");
 ```
 
-It will now show up in the Entity Hierarchy with that name. If you want to disable it, equvivalent to `gameObject.SetActive(false)`, that's just adding a `Disabled` tag-component to it:
+It will now show up in the Entity Hierarchy with that name. If you want to disable it, equivalent to `gameObject.SetActive(false)`, that's just adding a `Disabled` tag-component to it:
 
 ```c#
 entityManager.AddComponent<Disabled>(entity);
@@ -647,7 +647,7 @@ entityManager.RemoveComponent<Health>(entity);
 
 ### Finding Entity components
 
-To find components, you can create `EntityQuery`s. Queries can be configued with groups of Components, exclusion of components, read-only/read-write, and more complicated things like filtering based on Shared Components (a later topic), but for now we'll just create a query to find all our `Health`s.
+To find components, you can create `EntityQuery`s. Queries can be configured with groups of Components, exclusion of components, read-only/read-write, and more complicated things like filtering based on Shared Components (a later topic), but for now we'll just create a query to find all our `Health`s.
 
 ```c#
 var query = entityManager.CreateEntityQuery(typeof(Health));
@@ -709,7 +709,7 @@ healths.Dispose();
 defences.Dispose();
 ```
 
-One good thing to know about entity queries is that `ToComponentDataArray` might be a blocking operation. As we'll see later, we'll be able to run asyncronous jobs on entity component data. If you run `ToComponentDataArray` on an entity query while there's a background job modifying values of components we're trying to query, this method will block, and wait for that job to finish, before it can safely read the component data, and return the array. Actually, as we've created them now, even a background job just reading the component data will block the `ToComponentDataArray`; this is because it's assumed by default that we want read/write access to the data in the query. That's why, if we just query the data to read it, it's good to specify that we want just read-only access to the components. This is done with this syntax:
+One good thing to know about entity queries is that `ToComponentDataArray` might be a blocking operation. As we'll see later, we'll be able to run asynchronous jobs on entity component data. If you run `ToComponentDataArray` on an entity query while there's a background job modifying values of components we're trying to query, this method will block, and wait for that job to finish, before it can safely read the component data, and return the array. Actually, as we've created them now, even a background job just reading the component data will block the `ToComponentDataArray`; this is because it's assumed by default that we want read/write access to the data in the query. That's why, if we just query the data to read it, it's good to specify that we want just read-only access to the components. This is done with this syntax:
 
 ```c#
 var query = entities.CreateEntityQuery(
@@ -942,7 +942,7 @@ Now, the targeting data we calculate is just written to component data by a job,
 
 This is actually a bit more tricky than you might imagine. For each unit, it has a `UnitTargeting` component, that contains the Entity that it wants to attack. So we need to loop over each unit, check if it has a target, and if it does, get that entity, get its `Health` component, and subtract some damage. This would be fairly straightforward to do on the main thread; just use `EntityQuery` and `GetComponentData`/`SetComponentData`.
 
-Doing it this way, however, would go a bit aginst the entities way of doing things; entity queries and reading/writing component data can only be done on the main thread (with exceptions, but let's just assume that as a general rule for now). Doing all this on the main thread would not only miss out on running it in non-blocking in parallel, but reading the targeting data just after scheduling the target data calculation in the previous system would have to block the main thread waiting for that job to finish, completely removing the benefit of jobifying it in the first place! (well, not completely, it's still going to be parallelized across multiple cores, but still.)
+Doing it this way, however, would go a bit against the entities way of doing things; entity queries and reading/writing component data can only be done on the main thread (with exceptions, but let's just assume that as a general rule for now). Doing all this on the main thread would not only miss out on running it in non-blocking in parallel, but reading the targeting data just after scheduling the target data calculation in the previous system would have to block the main thread waiting for that job to finish, completely removing the benefit of jobifying it in the first place! (well, not completely, it's still going to be parallelized across multiple cores, but still.)
 
 A more optimal approach would be to do all this from entity jobs. Just remember that jobs need all their data up front; in our targeting data we only have the entity to attack, but not direct access to the health component. We want to schedule the job in parallel, and if two units have the same target, they might want to write to the same `Health` component from different threads. Clearly another approach is needed.
 
@@ -983,7 +983,7 @@ Dependency = new CollectDamagesJob {
 
 We use the `[EntityIndexInQuery]` attribute on the entityIndex parameter to get the index of the current entity being processed. The amount of damage done is read from a `UnitStats` component that we use to hold things like strength of each unit.
 
-Then we create an entity query to calcualte how long our arrays should be. The `CalculateEntityCount` is not going to block, even if a job is writing to some of the components, since jobs can only change values, not add or remove entities/components. Then we also pass in the query to the ScheduleParallel, since then it avoids auto-creating the same query again, and it will also check that the query used for the list and the job will actually match up.
+Then we create an entity query to calculate how long our arrays should be. The `CalculateEntityCount` is not going to block, even if a job is writing to some of the components, since jobs can only change values, not add or remove entities/components. Then we also pass in the query to the ScheduleParallel, since then it avoids auto-creating the same query again, and it will also check that the query used for the list and the job will actually match up.
 
 Now that we have an array of entities getting hurt, and a corresponding array of how badly they're getting hurt, we can create a job that for each unit subtracts health based on those arrays:
 
@@ -1054,6 +1054,8 @@ Of course this is kind of a lot of work, and getting it to run in parallel requi
 
 If you want some homework, try to extend this to only attack enemies within a certain range. You could create a range parameter in the `UnitStats` component. You could also try to add area damage, so that some units would attack all targets within some radius, instead of just one target. 
 
-### Chainging systems
+### Chaining systems
+
+Now that we have both our 
 
 *You've reached the end for now. I'm still working on this. Please let me know what you think!*
